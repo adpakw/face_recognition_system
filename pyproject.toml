@@ -14,6 +14,10 @@ opencv-python = "^4.10.0.84"
 scipy = "^1.14.1"
 tqdm = "^4.67.1"
 ipywidgets = "^8.1.5"
+ffmpeg-python = "^0.2.0"
+requests = "^2.32.3"
+scikit-image = "^0.25.2"
+pandas = "^2.2.3"
 
 
 [build-system]
