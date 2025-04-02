@@ -1,2 +1,7 @@
 .venv
 __pycache__
+.DS_Store
+.vscode
+*.mp4
+*.jpeg
+*.jpg
