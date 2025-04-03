@@ -1,12 +1,14 @@
+from typing import Iterator, Optional, Tuple
+
 import cv2
-from typing import Iterator, Tuple, Optional
 import numpy as np
+
 
 class OpenCVVideoProcessor:
     def __init__(self, video_path: str, target_fps: Optional[float] = None):
         """
         Инициализация видеопроцессора
-        
+
         :param video_path: путь к видеофайлу
         :param target_fps: целевая частота кадров (None - оригинальная частота)
         """
@@ -35,7 +37,6 @@ class OpenCVVideoProcessor:
         if self.original_fps <= 0:
             self.original_fps = 30.0  # fallback
 
-        # Рассчитываем сколько кадров нужно пропускать
         if self.target_fps is not None and self.target_fps < self.original_fps:
             self.frame_skip = int(self.original_fps / self.target_fps) - 1
         else:
@@ -50,7 +51,7 @@ class OpenCVVideoProcessor:
     def frames(self) -> Iterator[Tuple[np.ndarray, float, int]]:
         """
         Генератор кадров видео
-        
+
         :return: итератор кортежей (кадр, timestamp в секундах, номер кадра)
         """
         if self.cap is None:
@@ -65,7 +66,6 @@ class OpenCVVideoProcessor:
             if not ret:
                 break
 
-            # Пропускаем кадры если нужно
             if self.current_frame_pos % (self.frame_skip + 1) != 0:
                 self.current_frame_pos += 1
                 self.current_time += frame_interval
@@ -82,11 +82,11 @@ class OpenCVVideoProcessor:
             self.open()
 
         return {
-            'width': int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-            'height': int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-            'original_fps': self.original_fps,
-            'total_frames': int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)),
-            'duration': int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)) / self.original_fps,
-            'target_fps': self.target_fps if self.target_fps else self.original_fps,
-            'frame_skip': self.frame_skip
+            "width": int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+            "height": int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+            "original_fps": self.original_fps,
+            "total_frames": int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)),
+            "duration": int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)) / self.original_fps,
+            "target_fps": self.target_fps if self.target_fps else self.original_fps,
+            "frame_skip": self.frame_skip,
         }

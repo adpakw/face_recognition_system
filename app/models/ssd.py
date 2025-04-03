@@ -1,9 +1,8 @@
+import cv2
+import numpy as np
 import torch
 import torchvision
 from torchvision.models.detection import SSD300_VGG16_Weights
-import cv2
-import numpy as np
-import time
 
 
 class PeopleDetectorModel:
@@ -34,100 +33,6 @@ class PeopleDetectorModel:
                 ),
             ]
         )
-
-        self.coco_classes = [
-            "__background__",
-            "person",
-            "bicycle",
-            "car",
-            "motorcycle",
-            "airplane",
-            "bus",
-            "train",
-            "truck",
-            "boat",
-            "traffic light",
-            "fire hydrant",
-            "N/A",
-            "stop sign",
-            "parking meter",
-            "bench",
-            "bird",
-            "cat",
-            "dog",
-            "horse",
-            "sheep",
-            "cow",
-            "elephant",
-            "bear",
-            "zebra",
-            "giraffe",
-            "N/A",
-            "backpack",
-            "umbrella",
-            "N/A",
-            "N/A",
-            "handbag",
-            "tie",
-            "suitcase",
-            "frisbee",
-            "skis",
-            "snowboard",
-            "sports ball",
-            "kite",
-            "baseball bat",
-            "baseball glove",
-            "skateboard",
-            "surfboard",
-            "tennis racket",
-            "bottle",
-            "N/A",
-            "wine glass",
-            "cup",
-            "fork",
-            "knife",
-            "spoon",
-            "bowl",
-            "banana",
-            "apple",
-            "sandwich",
-            "orange",
-            "broccoli",
-            "carrot",
-            "hot dog",
-            "pizza",
-            "donut",
-            "cake",
-            "chair",
-            "couch",
-            "potted plant",
-            "bed",
-            "N/A",
-            "dining table",
-            "N/A",
-            "N/A",
-            "toilet",
-            "N/A",
-            "tv",
-            "laptop",
-            "mouse",
-            "remote",
-            "keyboard",
-            "cell phone",
-            "microwave",
-            "oven",
-            "toaster",
-            "sink",
-            "refrigerator",
-            "N/A",
-            "book",
-            "clock",
-            "vase",
-            "scissors",
-            "teddy bear",
-            "hair drier",
-            "toothbrush",
-        ]
 
     def detect_people(self, image, confidence_threshold=0.5):
         """
@@ -178,18 +83,16 @@ class PeopleDetectorModel:
         mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
         std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
         tensor = tensor * std + mean
-        
+
         tensor = torch.clamp(tensor, 0, 1)
         np_img = tensor.numpy()
-        
+
         np_img = np.transpose(np_img, (1, 2, 0))
-        
+
         np_img = (np_img * 255).astype(np.uint8)
-        
+
         bgr_img = cv2.cvtColor(np_img, cv2.COLOR_RGB2BGR)
 
-        cv2.imshow('Tensor Image', bgr_img)
+        cv2.imshow("Tensor Image", bgr_img)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
-
-
