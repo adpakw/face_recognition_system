@@ -4,13 +4,15 @@ import cv2
 import numpy as np
 
 
-class OpenCVVideoProcessor:
+class OpenCVVideoReader:
     def __init__(self, video_path: str, target_fps: Optional[float] = None):
         """
         Инициализация видеопроцессора
 
         :param video_path: путь к видеофайлу
-        :param target_fps: целевая частота кадров (None - оригинальная частота)
+        :param target_fps: целевая частота кадров
+                          (None - оригинальная частота,
+                          если target_fps > original_fps - используется original_fps)
         """
         self.video_path = video_path
         self.target_fps = target_fps
@@ -37,8 +39,12 @@ class OpenCVVideoProcessor:
         if self.original_fps <= 0:
             self.original_fps = 30.0  # fallback
 
-        if self.target_fps is not None and self.target_fps < self.original_fps:
-            self.frame_skip = int(self.original_fps / self.target_fps) - 1
+        if self.target_fps is not None:
+            if self.target_fps < self.original_fps:
+                self.frame_skip = int(self.original_fps / self.target_fps) - 1
+            else:
+                self.target_fps = self.original_fps
+                self.frame_skip = 0
         else:
             self.frame_skip = 0
 

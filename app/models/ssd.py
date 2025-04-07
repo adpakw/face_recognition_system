@@ -75,7 +75,9 @@ class PeopleDetectorModel:
                 x2 = max(0, min(x2, orig_width - 1))
                 y2 = max(0, min(y2, orig_height - 1))
 
-                people_boxes.append(((x1, y1, x2, y2), score))
+                people_boxes.append(
+                    {"x1": x1, "x2": x2, "y1": y1, "y2": y2, "score": score}
+                )
 
         return people_boxes
 

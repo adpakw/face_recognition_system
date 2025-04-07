@@ -51,7 +51,7 @@ class JsonProcessor:
             "start_time": self.current_start_time,
             "end_time": self.current_end_time,
             "processing_date": datetime.now().isoformat(),
-            "detections": self.current_detections,
+            "frames": self.current_detections,
         }
 
         with open(self.current_file_path, "w") as f:
@@ -62,11 +62,7 @@ class JsonProcessor:
         return len(json.dumps(detection_data).encode("utf-8"))
 
     def save_detections(
-        self,
-        video_path: str,
-        frame_num: int,
-        timestamp: float,
-        boxes_with_scores: List[tuple],
+        self, video_path: str, frame_num: int, timestamp: float, people
     ) -> str:
         """
         Сохраняет данные детектирования в JSON файлы (не более 10MB каждый)
@@ -83,17 +79,17 @@ class JsonProcessor:
         detection_data = {
             "frame_number": frame_num,
             "timestamp": round(timestamp, 3),
-            "detections": [
+            "people": [
                 {
                     "bbox": {
-                        "x1": int(box[0]),
-                        "y1": int(box[1]),
-                        "x2": int(box[2]),
-                        "y2": int(box[3]),
+                        "x1": int(person["x1"]),
+                        "y1": int(person["y1"]),
+                        "x2": int(person["x2"]),
+                        "y2": int(person["y2"]),
                     },
-                    "confidence": round(float(score), 5),
+                    "confidence": round(float(person["score"]), 5),
                 }
-                for box, score in boxes_with_scores
+                for person in people
             ],
         }
 
@@ -101,7 +97,7 @@ class JsonProcessor:
 
         if (
             self.current_file_path is None
-            or self.current_file_size + new_data_size > 10 * 1024 * 1024
+            or self.current_file_size + new_data_size > 512 * 1024
         ):
 
             if self.current_file_path is not None:
