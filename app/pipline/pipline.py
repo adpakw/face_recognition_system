@@ -104,6 +104,6 @@ class AutomaticIdentificationPipeline:
         self.process_video(
             "data/1080p_Видео_от_Записи_для_аналитики (5).mp4",
             30,
-            show_video=False,
+            show_video=True,
             save_in_json=True,
         )

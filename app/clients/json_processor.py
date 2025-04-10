@@ -81,7 +81,7 @@ class JsonProcessor:
             "timestamp": round(timestamp, 3),
             "people": [
                 {
-                    "bbox": {
+                    "person": {
                         "x1": int(person["x1"]),
                         "y1": int(person["y1"]),
                         "x2": int(person["x2"]),

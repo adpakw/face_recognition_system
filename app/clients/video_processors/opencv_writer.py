@@ -55,7 +55,7 @@ class OpenCVVideoWriter:
     ) -> np.ndarray:
         """Отрисовка детекций на кадре"""
         for el in data:
-            bbox = el["bbox"]
+            bbox = el["person"]
             x1, y1, x2, y2 = bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]
 
             # Рисуем bounding box

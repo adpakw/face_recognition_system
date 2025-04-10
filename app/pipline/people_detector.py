@@ -9,8 +9,9 @@ from app.clients.video_processors.opencv_reader import OpenCVVideoReader
 from app.models.ssd import PeopleDetectorModel
 
 class PeopleDetector:
-    def __init__(self):
-        self.detection_model = PeopleDetectorModel()
+    def __init__(self, device: str = "cuda", confidence_threshold = 0.7):
+        self.detection_model = PeopleDetectorModel(device)
+        self.confidence_threshold = confidence_threshold
 
 
     def draw_detections(self, image, detections):
@@ -53,7 +54,7 @@ class PeopleDetector:
         result = {"frame": None, "people_boxes": None}
 
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        result["people_boxes"] = self.detection_model.detect_people(frame_rgb)
+        result["people_boxes"] = self.detection_model.detect_people(frame_rgb, confidence_threshold=self.confidence_threshold)
 
         if show_video:
             result_frame = self.draw_detections(frame.copy(), result["people_boxes"])
