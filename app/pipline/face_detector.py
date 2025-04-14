@@ -41,9 +41,14 @@ class FaceDetector:
             face_bbox = self.detection_model.detect_faces(
                 frame, person_bbox=person_bbox, confidence_threshold=self.confidence_threshold
             )
-            face_bboxes.append(face_bbox[0])
-            result["result_dicts"].append({"person_bbox": person_bbox,
-                                           "face_bbox": face_bbox})
+            if len(face_bbox) > 0:
+                face_bboxes.append(face_bbox[0])
+                result["result_dicts"].append({"person_bbox": person_bbox,
+                                            "face_bbox": face_bbox[0]})
+            
+            else:
+                result["result_dicts"].append({"person_bbox": person_bbox,
+                                            "face_bbox": None})
 
         if show_video:
             result["frame"] = self.visualize(frame.copy(), face_bboxes)

@@ -51,24 +51,61 @@ class OpenCVVideoWriter:
         return json_files
 
     def _draw_people_detections(
-        self, frame: np.ndarray, data: List[Dict]
+        self, frame: np.ndarray, people_data: List[Dict]
     ) -> np.ndarray:
-        """Отрисовка детекций на кадре"""
-        for el in data:
-            bbox = el["person"]
-            x1, y1, x2, y2 = bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]
-
-            # Рисуем bounding box
+        """
+        Отрисовка детекций людей и лиц на кадре
+        
+        Args:
+            frame: Входное изображение (numpy array)
+            people_data: Список детекций людей в формате:
+                [
+                    {
+                        "person": {"x1", "y1", "x2", "y2", "confidence"},
+                        "face": {"x1", "y1", "x2", "y2", "confidence"} или None
+                    },
+                    ...
+                ]
+        
+        Returns:
+            Изображение с нарисованными bounding boxes
+        """
+        frame = frame.copy()
+        
+        for person_data in people_data:
+            # Отрисовка человека
+            person = person_data["person"]
+            x1, y1, x2, y2 = person["x1"], person["y1"], person["x2"], person["y2"]
+            
+            # Рисуем bounding box человека (зеленый)
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-            # Добавляем подпись с confidence
-            label = f"Person: {el['confidence']:.2f}"
-            (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
+            
+            # Подпись для человека
+            person_label = f"Person: {person['confidence']:.2f}"
+            (w, h), _ = cv2.getTextSize(person_label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
             cv2.rectangle(frame, (x1, y1 - 20), (x1 + w, y1), (0, 255, 0), -1)
             cv2.putText(
-                frame, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1
+                frame, person_label, (x1, y1 - 5), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1
             )
-
+            
+            # Отрисовка лица (если есть)
+            if person_data.get("face") is not None:
+                face = person_data["face"]
+                fx1, fy1, fx2, fy2 = face["x1"], face["y1"], face["x2"], face["y2"]
+                
+                # Рисуем bounding box лица (синий)
+                cv2.rectangle(frame, (fx1, fy1), (fx2, fy2), (255, 0, 0), 2)
+                
+                # Подпись для лица
+                face_label = f"Face: {face['confidence']:.2f}"
+                (fw, fh), _ = cv2.getTextSize(face_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                cv2.rectangle(frame, (fx1, fy1 - 15), (fx1 + fw, fy1), (255, 0, 0), -1)
+                cv2.putText(
+                    frame, face_label, (fx1, fy1 - 3), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1
+                )
+        
         return frame
 
     def get_result_video(

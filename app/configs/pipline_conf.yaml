@@ -1,0 +1,16 @@
+pipline:
+  people_detector:
+    device: "cuda"
+    confidence_threshold: 0.7
+  
+  face_detector:
+    model_path: "app/models/weights/face_detection_yunet_2023mar.onnx"
+    score_threshold: 0.3
+    nms_threshold: 0.3
+    top_k: 5000
+    device: "cpu"
+    confidence_threshold: 0.7
+
+general:
+  output_dir: "results"
+  json_size: 524288

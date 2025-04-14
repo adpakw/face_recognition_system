@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 
 
 class JsonProcessor:
-    def __init__(self, output_root: str = "detection_results"):
+    def __init__(self, output_root: str = "detection_results", json_size: int = 512 * 1024):
         """
         Инициализация процессора для работы с JSON
 
@@ -14,6 +14,7 @@ class JsonProcessor:
         self.output_root = output_root
         os.makedirs(self.output_root, exist_ok=True)
 
+        self.json_size = json_size
         self.current_file_path = None
         self.current_file_size = 0
         self.current_detections = []
@@ -82,12 +83,19 @@ class JsonProcessor:
             "people": [
                 {
                     "person": {
-                        "x1": int(person["x1"]),
-                        "y1": int(person["y1"]),
-                        "x2": int(person["x2"]),
-                        "y2": int(person["y2"]),
+                        "x1": int(person["person_bbox"]["x1"]),
+                        "y1": int(person["person_bbox"]["y1"]),
+                        "x2": int(person["person_bbox"]["x2"]),
+                        "y2": int(person["person_bbox"]["y2"]),
+                        "confidence": round(float(person["person_bbox"]["score"]), 5)
                     },
-                    "confidence": round(float(person["score"]), 5),
+                    "face": {
+                        "x1": int(person["face_bbox"]["x1"]),
+                        "y1": int(person["face_bbox"]["y1"]),
+                        "x2": int(person["face_bbox"]["x2"]),
+                        "y2": int(person["face_bbox"]["y2"]),
+                        "confidence": round(float(person["face_bbox"]["score"]), 5)
+                    } if person.get("face_bbox") is not None else None,
                 }
                 for person in people
             ],
@@ -97,7 +105,7 @@ class JsonProcessor:
 
         if (
             self.current_file_path is None
-            or self.current_file_size + new_data_size > 512 * 1024
+            or self.current_file_size + new_data_size > self.json_size
         ):
 
             if self.current_file_path is not None:
