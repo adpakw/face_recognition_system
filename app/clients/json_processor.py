@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 
 
 class JsonProcessor:
-    def __init__(self, output_root: str = "detection_results", json_size: int = 512 * 1024):
+    def __init__(self, output_root: str = "results", json_size: int = 512 * 1024):
         """
         Инициализация процессора для работы с JSON
 

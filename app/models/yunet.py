@@ -51,7 +51,7 @@ class YuNet:
             target_id=target,
         )
 
-    def detect_faces(self, original_image, person_bbox, confidence_threshold=0.7):
+    def detect_faces(self, image, input_size = (320, 320), confidence_threshold=0.7):
         """
         Детектирование лиц в области человека
 
@@ -63,26 +63,11 @@ class YuNet:
         Returns:
             list: Список обнаруженных лиц в формате [{'x1', 'y1', 'x2', 'y2', 'score'}, ...]
                   Координаты приведены к оригинальному изображению
-        """
-        # Вырезаем область человека
-        x1, y1, x2, y2 = (
-            person_bbox["x1"],
-            person_bbox["y1"],
-            person_bbox["x2"],
-            person_bbox["y2"],
-        )
-        person_img = original_image[y1:y2, x1:x2]
-
-        # Если область пустая - возвращаем пустой список
-        if person_img.size == 0:
-            return []
-
-        # Изменяем размер для модели
-        h, w = person_img.shape[:2]
-        self.model.setInputSize((w, h))  # Обновляем размер входного изображения
+        # """
+        self.model.setInputSize(input_size)  # Обновляем размер входного изображения
 
         # Детекция лиц
-        _, faces = self.model.detect(person_img)
+        _, faces = self.model.detect(image)
         if faces is None:
             return []
 
@@ -95,18 +80,6 @@ class YuNet:
             # Координаты лица относительно вырезанного изображения
             fx1, fy1, fw, fh = map(int, face[:4])
             fx2, fy2 = fx1 + fw, fy1 + fh
-
-            # Преобразование к координатам оригинального изображения
-            fx1 += x1
-            fy1 += y1
-            fx2 += x1
-            fy2 += y1
-
-            # Проверка границ
-            fx1 = max(0, min(fx1, original_image.shape[1] - 1))
-            fy1 = max(0, min(fy1, original_image.shape[0] - 1))
-            fx2 = max(0, min(fx2, original_image.shape[1] - 1))
-            fy2 = max(0, min(fy2, original_image.shape[0] - 1))
 
             detected_faces.append(
                 {"x1": fx1, "y1": fy1, "x2": fx2, "y2": fy2, "score": face[-1]}

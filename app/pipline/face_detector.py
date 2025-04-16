@@ -11,7 +11,7 @@ class FaceDetector:
         nms_threshold=0.3,
         top_k=5000,
         device="cpu",
-        confidence_threshold = 0.7
+        confidence_threshold=0.7,
     ):
         """
         Инициализация детектора лиц с использованием YuNet
@@ -27,7 +27,7 @@ class FaceDetector:
             score_threshold=score_threshold,
             nms_threshold=nms_threshold,
             top_k=top_k,
-            device=device
+            device=device,
         )
         self.confidence_threshold = confidence_threshold
 
@@ -38,17 +38,51 @@ class FaceDetector:
         face_bboxes = []
         result["result_dicts"] = []
         for person_bbox in people_bboxes:
-            face_bbox = self.detection_model.detect_faces(
-                frame, person_bbox=person_bbox, confidence_threshold=self.confidence_threshold
+            # Вырезаем область человека
+            x1, y1, x2, y2 = (
+                person_bbox["x1"],
+                person_bbox["y1"],
+                person_bbox["x2"],
+                person_bbox["y2"],
             )
+            person_img = frame[y1:y2, x1:x2]
+
+            if person_img.size == 0:
+                result["result_dicts"].append(
+                    {"person_bbox": person_bbox, "face_bbox": None}
+                )
+                continue
+
+            # Изменяем размер для модели
+            h, w = person_img.shape[:2]
+            face_bbox = self.detection_model.detect_faces(
+                person_img,
+                input_size=(w, h),
+                confidence_threshold=self.confidence_threshold,
+            )
+
             if len(face_bbox) > 0:
+                # Преобразование к координатам оригинального изображения
+                face_bbox[0]["x1"] += x1
+                face_bbox[0]["y1"] += y1
+                face_bbox[0]["x2"] += x1
+                face_bbox[0]["y2"] += y1
+
+                # Проверка границ
+                face_bbox[0]["x1"] = max(0, min(face_bbox[0]["x1"], frame.shape[1] - 1))
+                face_bbox[0]["y1"] = max(0, min(face_bbox[0]["y1"], frame.shape[0] - 1))
+                face_bbox[0]["x2"] = max(0, min(face_bbox[0]["x2"], frame.shape[1] - 1))
+                face_bbox[0]["y2"] = max(0, min(face_bbox[0]["y2"], frame.shape[0] - 1))
+                
                 face_bboxes.append(face_bbox[0])
-                result["result_dicts"].append({"person_bbox": person_bbox,
-                                            "face_bbox": face_bbox[0]})
-            
+                result["result_dicts"].append(
+                    {"person_bbox": person_bbox, "face_bbox": face_bbox[0]}
+                )
+
             else:
-                result["result_dicts"].append({"person_bbox": person_bbox,
-                                            "face_bbox": None})
+                result["result_dicts"].append(
+                    {"person_bbox": person_bbox, "face_bbox": None}
+                )
 
         if show_video:
             result["frame"] = self.visualize(frame.copy(), face_bboxes)
