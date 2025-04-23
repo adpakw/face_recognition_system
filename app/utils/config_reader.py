@@ -18,6 +18,11 @@ class FaceDetectorConfig(BaseModel):
     device: Literal["cuda", "cpu"]
     confidence_threshold: float
 
+class FaceRecognizerConfig(BaseModel):
+    model: Literal["ArcFace", "VGG-Face", "SFace"]
+    device: Literal["cuda", "cpu"]
+    confidence_threshold: float
+
 class GeneralConfig(BaseModel):
     output_dir: Path
     json_size: int
@@ -25,13 +30,14 @@ class GeneralConfig(BaseModel):
 class PipelineConfig(BaseModel):
     people_detector: PeopleDetectorConfig
     face_detector: FaceDetectorConfig
+    face_recognizer: FaceRecognizerConfig
 
 class AppConfig(BaseModel):
     pipline: PipelineConfig
     general: GeneralConfig
 
 class ConfigReader:
-    def __init__(self, config_path: Path):
+    def __init__(self, config_path: Path = Path("app/configs/pipline_conf.yaml")):
         """
         Инициализация читателя конфигурации
         
@@ -69,6 +75,10 @@ class ConfigReader:
     def get_face_detector_config(self) -> FaceDetectorConfig:
         """Возвращает конфигурацию детектора лиц"""
         return self._config.pipline.face_detector
+
+    def get_face_recognizer_config(self) -> FaceRecognizerConfig:
+        """Возвращает конфигурацию детектора лиц"""
+        return self._config.pipline.face_recognizer
 
     def get_general_config(self) -> GeneralConfig:
         """Возвращает общую конфигурацию"""

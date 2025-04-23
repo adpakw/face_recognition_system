@@ -96,6 +96,10 @@ class JsonProcessor:
                         "y2": int(person["face_bbox"]["y2"]),
                         "confidence": round(float(person["face_bbox"]["score"]), 5)
                     } if person.get("face_bbox") is not None else None,
+                    "person_id": {
+                        "name": person["person_id"]["name"],
+                        "confidence": round(float(person["person_id"]["score"]), 5)
+                    } if person.get("person_id") is not None else None,
                 }
                 for person in people
             ],

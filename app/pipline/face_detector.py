@@ -7,7 +7,7 @@ class FaceDetector:
     def __init__(
         self,
         model_path: str = "app/models/weights/face_detection_yunet_2023mar.onnx",
-        score_threshold=0.3,
+        score_threshold=0.9,
         nms_threshold=0.3,
         top_k=5000,
         device="cpu",

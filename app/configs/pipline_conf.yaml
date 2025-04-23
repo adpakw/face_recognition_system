@@ -1,7 +1,7 @@
 pipline:
   people_detector:
     device: "cuda"
-    confidence_threshold: 0.7
+    confidence_threshold: 0.8
   
   face_detector:
     model_path: "app/models/weights/face_detection_yunet_2023mar.onnx"
@@ -9,7 +9,21 @@ pipline:
     nms_threshold: 0.3
     top_k: 5000
     device: "cpu"
-    confidence_threshold: 0.7
+    confidence_threshold: 0.8
+
+  face_recognizer:  
+    # model: "SFace"
+    # device: "cpu"
+    # confidence_threshold: 0.5
+
+    model: "VGG-Face"
+    device: "cuda"
+    confidence_threshold: 0.5
+
+    # model: "ArcFace"
+    # device: "cuda"
+    # confidence_threshold: 0.5
+
 
 general:
   output_dir: "results"

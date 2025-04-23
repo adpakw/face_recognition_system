@@ -10,10 +10,11 @@ from app.pipline.base_processor import BaseProcessor
 from app.pipline.people_detector import PeopleDetector
 from app.pipline.face_detector import FaceDetector
 from app.utils.config_reader import ConfigReader
+from app.pipline.face_recognizer import FaceRecognizer
 
 
 class AutomaticIdentificationPipeline:
-    def __init__(self, config_path: str):
+    def __init__(self, config_path: str = "app/configs/pipline_conf.yaml"):
         """
         :param processors: список обработчиков в порядке их выполнения
         """
@@ -40,11 +41,14 @@ class AutomaticIdentificationPipeline:
             confidence_threshold=face_detector_config.confidence_threshold,
         )
 
+        self.face_recognizer = FaceRecognizer()
+
     def process_video(
         self,
         video_path: str,
         target_fps: float = 10,
         show_video: bool = False,
+        save_video: bool = False,
         save_in_json: bool = False,
         show_progress: bool = True,
     ):
@@ -58,9 +62,24 @@ class AutomaticIdentificationPipeline:
         :param show_progress: показывать ли прогресс-бар
         :return: (список путей к JSON-файлам, информация о видео)
         """
+        if save_video:
+            output_dir = Path("results")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / f"processed_{Path(video_path).name}"
+
         json_files = []
         with OpenCVVideoReader(video_path, target_fps=target_fps) as vp:
             video_info = vp.get_video_info()
+
+            if save_video:
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                frame_size = (video_info['width'], video_info['height'])
+                video_writer = cv2.VideoWriter(
+                    str(output_path),
+                    fourcc,
+                    target_fps,
+                    frame_size
+                )
 
             total_frames = int(
                 video_info["total_frames"]
@@ -93,8 +112,21 @@ class AutomaticIdentificationPipeline:
                         show_video=show_video,
                     )
 
-                    result = result_face_detector
+                    result_face_recognizer = self.face_recognizer.process(
+                        frame=result_face_detector["frame"],
+                        result_dicts=result_face_detector['result_dicts'],
+                        show_video=show_video
+                    )
 
+                    result = result_face_recognizer
+
+                    if save_video and result["frame"] is not None:
+                        result["frame"] = self.draw_frame_number(result["frame"], frame_num)
+                        video_writer.write(result["frame"])
+
+                    # перед сохранением в json можно добавить постпроцесор
+                    # который будет проходиться "скользящим окном"
+                    # брать последние N кадров
                     result_file = self.json_processor.save_detections(
                         video_path=video_path,
                         frame_num=frame_num,
@@ -114,6 +146,8 @@ class AutomaticIdentificationPipeline:
 
             finally:
                 pbar.close()
+                if save_video and video_writer is not None:
+                    video_writer.release()
                 if save_in_json:
                     self.json_processor.finalize()
                 if show_video:
@@ -132,8 +166,35 @@ class AutomaticIdentificationPipeline:
 
     def test_people_detector_video2(self):
         self.process_video(
-            "data/1080p_Видео_от_Записи_для_аналитики (5).mp4",
+            "datasets/videos/1080p_Видео_от_Записи_для_аналитики (5).mp4",
             30,
             show_video=True,
             save_in_json=True,
         )
+
+    def draw_frame_number(self,frame, frame_num):
+        """
+        Рисует номер кадра в правом верхнем углу изображения
+        
+        :param frame: кадр видео (numpy.ndarray)
+        :param frame_num: номер кадра (int)
+        :return: кадр с нарисованным номером
+        """
+        # Параметры текста
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.8
+        font_thickness = 2
+        font_color = (0, 255, 0)  # Зеленый цвет (BGR)
+        
+        # Позиция текста (правый верхний угол с отступом)
+        text = f"Frame: {frame_num}"
+        text_size = cv2.getTextSize(text, font, font_scale, font_thickness)[0]
+        text_x = frame.shape[1] - text_size[0] - 20  # Отступ 20 пикселей от правого края
+        text_y = text_size[1] + 20  # Отступ 20 пикселей от верхнего края
+        
+        # Рисуем текст на кадре
+        cv2.putText(frame, text, (text_x, text_y), 
+                font, font_scale, font_color, font_thickness, 
+                cv2.LINE_AA)
+        
+        return frame

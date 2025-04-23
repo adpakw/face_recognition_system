@@ -2,18 +2,22 @@ import os
 import cv2
 import numpy as np
 import shutil
-from typing import Optional, Tuple
-
+from typing import Optional, Tuple, Literal
+from app.models.yunet import YuNet
+from app.models.arcface import ArcFace
+from app.models.vgg_face import VGG_16
+from app.utils.config_reader import ConfigReader
+from app.models.sface import SFace
 
 class ImageDataset:
     def __init__(
         self,
-        face_detector,
-        face_feature_extractor,
-        backup_dir: str,
-        add_persons_dir: str,
-        faces_save_dir: str,
-        features_path: str,
+        face_detector: YuNet = YuNet(),
+        face_encoder: Literal["ArcFace", "VGG-Face"] = "ArcFace",
+        backup_dir: str = "datasets/backup",
+        add_persons_dir: str = "datasets/new_persons",
+        faces_save_dir: str = "datasets/data",
+        features_path: str = "datasets/face_features/feature.npz",
     ):
         """
         Initialize the face dataset manager.
@@ -27,7 +31,13 @@ class ImageDataset:
             features_path: Path to .npz file with face features
         """
         self.face_detector = face_detector
-        self.face_feature_extractor = face_feature_extractor
+
+        self.config_reader = ConfigReader()
+        face_recognizer_config = self.config_reader.get_face_recognizer_config()
+
+        self._choose_model(
+            model=face_recognizer_config.model, device=face_recognizer_config.device
+        )
 
         self.backup_dir = self._ensure_dir_exists(backup_dir)
         self.add_persons_dir = self._ensure_dir_exists(add_persons_dir)
@@ -40,6 +50,16 @@ class ImageDataset:
         """Ensure directory exists, create if not. Returns normalized path."""
         os.makedirs(dir_path, exist_ok=True)
         return os.path.normpath(dir_path)
+
+    def _choose_model(self, model, device):
+        if model == "ArcFace":
+            self.face_encoder = ArcFace(device)
+        elif model == "VGG-Face":
+            self.face_encoder = VGG_16(device)
+        elif model == "SFace":
+            self.face_embedding_extractor = SFace()
+        else:
+            ValueError
 
     def add_persons(self) -> None:
         """
@@ -104,7 +124,10 @@ class ImageDataset:
                     cv2.imwrite(os.path.join(face_dir, f"{face_id}.jpg"), face)
 
                     # Extract features
-                    embedding = self.face_feature_extractor.get_embeddings(face)
+                    if isinstance(self.face_encoder, SFace):
+                        embedding = self.face_encoder.get_embeddings(img, (bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]))
+                    else:
+                        embedding = self.face_encoder.get_embeddings(face)
                     names.append(person_name)
                     embeddings.append(embedding)
 
@@ -138,7 +161,7 @@ class ImageDataset:
             src = os.path.join(src_dir, item)
             dst = os.path.join(dst_dir, item)
             shutil.move(src, dst)
-    
+
     def read_features(self):
         try:
             data = np.load(self.features_path, allow_pickle=True)

@@ -76,6 +76,11 @@ class YuNet:
         for face in faces:
             if face[-1] < confidence_threshold:  # face[-1] - confidence score
                 continue
+            
+            # landmarks = face[4:14].reshape(5, 2).astype(int)
+            
+            # if not self._validate_landmarks(landmarks, input_size):
+            #     continue  # Пропускаем лица с плохими landmarks
 
             # Координаты лица относительно вырезанного изображения
             fx1, fy1, fw, fh = map(int, face[:4])
@@ -86,3 +91,31 @@ class YuNet:
             )
 
         return detected_faces
+
+    def _validate_landmarks(self, landmarks: np.ndarray, input_size) -> bool:
+        """Проверка качества landmarks"""
+        if landmarks.shape != (5, 2):
+            return False
+        
+        width, height = input_size
+        x_valid = np.all((landmarks[:, 0] >= 0) & (landmarks[:, 0] <= width))
+        y_valid = np.all((landmarks[:, 1] >= 0) & (landmarks[:, 1] <= height))
+        
+        if not (x_valid and y_valid):
+            return False
+        
+        left_eye = landmarks[0]
+        right_eye = landmarks[1]
+        eye_dist = np.linalg.norm(right_eye - left_eye)
+        
+        # Эмпирически определяем минимальное расстояние (5% от ширины изображения)
+        min_eye_dist = 0.05 * width
+        
+        if eye_dist < min_eye_dist:
+            return False
+            
+        # Проверка на минимальное расстояние между точками
+        if len(np.unique(landmarks, axis=0)) < 5:
+            return False
+            
+        return True
