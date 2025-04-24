@@ -1,54 +1,50 @@
 from pathlib import Path
-from typing import Dict, Literal, Optional
-
+from typing import Dict, Literal, Optional, Union, Any
+from enum import Enum
 import yaml
-from pydantic import BaseModel, Field 
+from pydantic import BaseModel
 
 
-# Модели для валидации конфига
-class PeopleDetectorConfig(BaseModel):
+class ModelConfig(BaseModel):
     device: Literal["cuda", "cpu"]
     confidence_threshold: float
 
-class FaceDetectorConfig(BaseModel):
+
+class YuNetConfig(ModelConfig):
     model_path: Path
     score_threshold: float
     nms_threshold: float
     top_k: int
-    device: Literal["cuda", "cpu"]
-    confidence_threshold: float
+    face_padding: float
 
-class FaceRecognizerConfig(BaseModel):
-    model: Literal["ArcFace", "VGG-Face", "SFace"]
-    device: Literal["cuda", "cpu"]
-    confidence_threshold: float
+
+class PipelineStep(BaseModel):
+    model: str
+
 
 class GeneralConfig(BaseModel):
     output_dir: Path
     json_size: int
 
-class PipelineConfig(BaseModel):
-    people_detector: PeopleDetectorConfig
-    face_detector: FaceDetectorConfig
-    face_recognizer: FaceRecognizerConfig
+    backup_dir: Path
+    add_persons_dir: Path
+    faces_save_dir: Path
+    features_dir: Path
+    gpu_id: int
+
 
 class AppConfig(BaseModel):
-    pipline: PipelineConfig
+    pipeline: Dict[str, PipelineStep]  # Этапы пайплайна
     general: GeneralConfig
+    models: Dict[str, Any]  # Конфиги всех моделей
+
 
 class ConfigReader:
-    def __init__(self, config_path: Path = Path("app/configs/pipline_conf.yaml")):
-        """
-        Инициализация читателя конфигурации
-        
-        Args:
-            config_path: Путь к YAML конфигурационному файлу
-        """
+    def __init__(self, config_path: Path = Path("app/configs/pipeline_conf.yaml")):
         self.config_path = config_path
         self._config = self._load_and_validate()
 
     def _load_and_validate(self) -> AppConfig:
-        """Загружает и валидирует конфигурацию"""
         if not self.config_path.exists():
             raise FileNotFoundError(f"Config file not found: {self.config_path}")
 
@@ -56,10 +52,12 @@ class ConfigReader:
             raw_config = yaml.safe_load(f)
         
         # Конвертируем строковые пути в Path объекты
-        if 'pipline' in raw_config and 'face_detector' in raw_config['pipline']:
-            raw_config['pipline']['face_detector']['model_path'] = Path(
-                raw_config['pipline']['face_detector']['model_path']
-            )
+        if 'models' in raw_config:
+            for model_name, model_config in raw_config['models'].items():
+                if 'model_path' in model_config:
+                    raw_config['models'][model_name]['model_path'] = Path(
+                        model_config['model_path']
+                    )
         
         if 'general' in raw_config and 'output_dir' in raw_config['general']:
             raw_config['general']['output_dir'] = Path(
@@ -68,22 +66,15 @@ class ConfigReader:
         
         return AppConfig(**raw_config)
 
-    def get_people_detector_config(self) -> PeopleDetectorConfig:
-        """Возвращает конфигурацию детектора людей"""
-        return self._config.pipline.people_detector
-
-    def get_face_detector_config(self) -> FaceDetectorConfig:
-        """Возвращает конфигурацию детектора лиц"""
-        return self._config.pipline.face_detector
-
-    def get_face_recognizer_config(self) -> FaceRecognizerConfig:
-        """Возвращает конфигурацию детектора лиц"""
-        return self._config.pipline.face_recognizer
+    def get_pipeline_step_config(self, step_name: str):
+        """Возвращает конфиг для конкретного этапа пайплайна"""
+        step = self._config.pipeline[step_name]
+        model_config = self._config.models[step.model].copy()
+        
+        return {"name": step.model, "cfg": model_config}
 
     def get_general_config(self) -> GeneralConfig:
-        """Возвращает общую конфигурацию"""
         return self._config.general
 
     def get_config(self) -> AppConfig:
-        """Возвращает всю валидированную конфигурацию"""
         return self._config

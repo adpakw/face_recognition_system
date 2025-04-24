@@ -1,10 +1,10 @@
-from app.pipline.people_detector import PeopleDetector
-from app.pipline.pipline import AutomaticIdentificationPipeline
+from app.pipeline.people_detector import PeopleDetector
+from app.pipeline.pipeline import AutomaticIdentificationPipeline
 from app.clients.video_processors.opencv_writer import OpenCVVideoWriter
 
 
 def main():
-    people_detector = PeopleDetector()
+    # people_detector = PeopleDetector()
 
     # people_detector.test_people_detector_img()
 
@@ -12,10 +12,9 @@ def main():
 
     # pipline = AutomaticIdentificationPipeline({"people_detector": people_detector})
     pipline = AutomaticIdentificationPipeline(
-        config_path="app/configs/pipline_conf.yaml"
     )
 
-    pipline.process_video("datasets/videos/testt.mp4", 30, True, True, True, True)
+    pipline.process_video("datasets/videos/aaivoninskaya, avzotova_4, anaalesuslova.mp4", 30, True, True, True, True)
 
     # pipline.test_people_detector_video2()
 

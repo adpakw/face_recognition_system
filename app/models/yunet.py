@@ -8,8 +8,7 @@ class YuNet:
         model_path: str = "app/models/weights/face_detection_yunet_2023mar.onnx",
         score_threshold=0.3,
         nms_threshold=0.3,
-        top_k=5000,
-        device: str = "cpu",
+        top_k=5000
     ):
         """
         Инициализация детектора лиц с YuNet
@@ -17,29 +16,7 @@ class YuNet:
         Args:
             model_path (str): Путь к ONNX модели YuNet
             input_size (tuple): Размер входного изображения для модели (ширина, высота)
-            device (str): Устройство для вычислений ('cuda' или 'cpu')
         """
-        self.device = device.lower()
-
-        # Проверяем доступность CUDA
-        cuda_available = cv2.cuda.getCudaEnabledDeviceCount() > 0
-        if self.device == "cuda" and not cuda_available:
-            print("Warning: CUDA requested but not available, falling back to CPU")
-            self.device = "cpu"
-
-        # Выбираем бэкенд в зависимости от устройства
-        if self.device == "cuda":
-            backend = cv2.dnn.DNN_BACKEND_CUDA
-            target = cv2.dnn.DNN_TARGET_CUDA
-            device_info = "CUDA"
-        else:
-            backend = cv2.dnn.DNN_BACKEND_OPENCV
-            target = cv2.dnn.DNN_TARGET_CPU
-            device_info = "CPU"
-
-        print(f"YuNet face detector initialized on {device_info} device")
-
-        # Загрузка модели YuNet
         self.model = cv2.FaceDetectorYN.create(
             model=model_path,
             config="",
@@ -47,9 +24,11 @@ class YuNet:
             score_threshold=score_threshold,
             nms_threshold=nms_threshold,
             top_k=top_k,
-            backend_id=backend,
-            target_id=target,
+            backend_id=cv2.dnn.DNN_BACKEND_OPENCV,
+            target_id=cv2.dnn.DNN_TARGET_CPU,
         )
+
+        print(f"YuNet face detector initialized on \"CPU\" device")
 
     def detect_faces(self, image, input_size = (320, 320), confidence_threshold=0.7):
         """

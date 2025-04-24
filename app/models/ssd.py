@@ -5,7 +5,7 @@ import torchvision
 from torchvision.models.detection import SSD300_VGG16_Weights
 
 
-class PeopleDetectorModel:
+class SSD:
     def __init__(self, device: str = "cuda" if torch.cuda.is_available() else "cpu"):
         """
         Инициализация детектора людей с SSD300

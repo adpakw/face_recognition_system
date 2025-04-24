@@ -1,0 +1,45 @@
+pipeline:
+  people_detector:
+    model: "SSD"
+  
+  face_detector:
+    model: "YuNet"
+  
+  face_recognizer:
+    model: VGG-Face
+
+general:
+  output_dir: "results"
+  json_size: 524288
+
+  backup_dir: "datasets/backup"
+  add_persons_dir: "datasets/new_persons"
+  faces_save_dir: "datasets/data"
+  features_dir: "datasets/face_features"
+  gpu_id: 0
+
+models:
+  SSD:
+    device: "cuda"
+    confidence_threshold: 0.5
+
+  YuNet:
+    model_path: "app/models/weights/face_detection_yunet_2023mar.onnx"
+    score_threshold: 0.3
+    nms_threshold: 0.3
+    top_k: 5000
+    device: "cpu"
+    face_padding: 0.3
+    confidence_threshold: 0.8
+
+  SFace:
+    device: "cuda"
+    confidence_threshold: 0.5
+
+  VGG-Face:
+    device: "cuda"
+    confidence_threshold: 0.5
+
+  ArcFace:
+    device: "cuda"
+    confidence_threshold: 0.5

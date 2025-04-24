@@ -6,42 +6,32 @@ from tqdm import tqdm
 from pathlib import Path
 from app.clients.json_processor import JsonProcessor
 from app.clients.video_processors.opencv_reader import OpenCVVideoReader
-from app.pipline.base_processor import BaseProcessor
-from app.pipline.people_detector import PeopleDetector
-from app.pipline.face_detector import FaceDetector
+from app.pipeline.base_processor import BaseProcessor
+from app.pipeline.people_detector import PeopleDetector
+from app.pipeline.face_detector import FaceDetector
 from app.utils.config_reader import ConfigReader
-from app.pipline.face_recognizer import FaceRecognizer
+from app.pipeline.face_search import FaceSearchService
 
 
 class AutomaticIdentificationPipeline:
-    def __init__(self, config_path: str = "app/configs/pipline_conf.yaml"):
+    def __init__(self):
         """
         :param processors: список обработчиков в порядке их выполнения
         """
-        self.config_reader = ConfigReader(config_path=Path(config_path))
+        self.config_reader = ConfigReader()
 
         general_config = self.config_reader.get_general_config()
         self.json_processor = JsonProcessor(
             output_root=general_config.output_dir, json_size=general_config.json_size
         )
 
-        people_detector_config = self.config_reader.get_people_detector_config()
         self.people_detector: PeopleDetector = PeopleDetector(
-            device=people_detector_config.device,
-            confidence_threshold=people_detector_config.confidence_threshold,
         )
 
-        face_detector_config = self.config_reader.get_face_detector_config()
         self.face_detector: FaceDetector = FaceDetector(
-            model_path=face_detector_config.model_path,
-            score_threshold=face_detector_config.score_threshold,
-            nms_threshold=face_detector_config.nms_threshold,
-            top_k=face_detector_config.top_k,
-            device=face_detector_config.device,
-            confidence_threshold=face_detector_config.confidence_threshold,
         )
 
-        self.face_recognizer = FaceRecognizer()
+        self.face_searcher: FaceSearchService = FaceSearchService()
 
     def process_video(
         self,
@@ -72,13 +62,10 @@ class AutomaticIdentificationPipeline:
             video_info = vp.get_video_info()
 
             if save_video:
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                frame_size = (video_info['width'], video_info['height'])
+                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                frame_size = (video_info["width"], video_info["height"])
                 video_writer = cv2.VideoWriter(
-                    str(output_path),
-                    fourcc,
-                    target_fps,
-                    frame_size
+                    str(output_path), fourcc, target_fps, frame_size
                 )
 
             total_frames = int(
@@ -89,7 +76,7 @@ class AutomaticIdentificationPipeline:
 
             print(f"\nProcessing video: {os.path.basename(video_path)}")
             print(
-                f"Duration: {duration:.2f}s, Frames: {total_frames}, Target FPS: {target_fps}, Original FPS {video_info["original_fps"]}"
+                f"Duration: {duration:.2f}s, Frames: {total_frames}, Target FPS: {target_fps}, Original FPS {video_info['original_fps']}"
             )
 
             pbar = tqdm(
@@ -101,27 +88,13 @@ class AutomaticIdentificationPipeline:
 
             try:
                 for frame, timestamp, frame_num in vp.frames():
-                    result_people_detector = self.people_detector.process(
-                        frame,
-                        show_video=show_video,
-                    )
 
-                    result_face_detector = self.face_detector.process(
-                        frame=result_people_detector["frame"],
-                        people_bboxes=result_people_detector["people_boxes"],
-                        show_video=show_video,
-                    )
-
-                    result_face_recognizer = self.face_recognizer.process(
-                        frame=result_face_detector["frame"],
-                        result_dicts=result_face_detector['result_dicts'],
-                        show_video=show_video
-                    )
-
-                    result = result_face_recognizer
+                    result = self.process_frame(frame, show_video)
 
                     if save_video and result["frame"] is not None:
-                        result["frame"] = self.draw_frame_number(result["frame"], frame_num)
+                        result["frame"] = self.draw_frame_number(
+                            result["frame"], frame_num
+                        )
                         video_writer.write(result["frame"])
 
                     # перед сохранением в json можно добавить постпроцесор
@@ -152,12 +125,32 @@ class AutomaticIdentificationPipeline:
                     self.json_processor.finalize()
                 if show_video:
                     cv2.destroyAllWindows()
-
         print("\nProcessing complete!")
         print(f"Video info: {video_info}")
         # print(f"Generated {len(json_files)} JSON files:")
         # for file_path in json_files:
         #     print(f"- {file_path}")
+    
+    def process_frame(self, frame, show_video):
+        result_people_detector = self.people_detector.process(
+            frame,
+            show_video=show_video,
+        )
+
+        result_face_detector = self.face_detector.process(
+            frame=result_people_detector["frame"],
+            people_bboxes=result_people_detector["people_boxes"],
+            show_video=show_video,
+        )
+
+        result_face_recognizer = self.face_searcher.process(
+            frame=result_face_detector["frame"],
+            result_dicts=result_face_detector["result_dicts"],
+            show_video=show_video,
+        )
+
+        return result_face_recognizer
+
 
     def test_people_detector_video(self):
         self.process_video(
@@ -172,10 +165,10 @@ class AutomaticIdentificationPipeline:
             save_in_json=True,
         )
 
-    def draw_frame_number(self,frame, frame_num):
+    def draw_frame_number(self, frame, frame_num):
         """
         Рисует номер кадра в правом верхнем углу изображения
-        
+
         :param frame: кадр видео (numpy.ndarray)
         :param frame_num: номер кадра (int)
         :return: кадр с нарисованным номером
@@ -185,16 +178,25 @@ class AutomaticIdentificationPipeline:
         font_scale = 0.8
         font_thickness = 2
         font_color = (0, 255, 0)  # Зеленый цвет (BGR)
-        
+
         # Позиция текста (правый верхний угол с отступом)
         text = f"Frame: {frame_num}"
         text_size = cv2.getTextSize(text, font, font_scale, font_thickness)[0]
-        text_x = frame.shape[1] - text_size[0] - 20  # Отступ 20 пикселей от правого края
+        text_x = (
+            frame.shape[1] - text_size[0] - 20
+        )  # Отступ 20 пикселей от правого края
         text_y = text_size[1] + 20  # Отступ 20 пикселей от верхнего края
-        
+
         # Рисуем текст на кадре
-        cv2.putText(frame, text, (text_x, text_y), 
-                font, font_scale, font_color, font_thickness, 
-                cv2.LINE_AA)
-        
+        cv2.putText(
+            frame,
+            text,
+            (text_x, text_y),
+            font,
+            font_scale,
+            font_color,
+            font_thickness,
+            cv2.LINE_AA,
+        )
+
         return frame
