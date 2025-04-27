@@ -4,6 +4,7 @@ from app.clients.video_processors.opencv_writer import OpenCVVideoWriter
 from app.utils.config_reader import ConfigReader
 import os
 import time
+import tensorflow as tf
 def main():
     # people_detector = PeopleDetector()
 
@@ -12,6 +13,7 @@ def main():
     # people_detector.test_people_detector_video2()
 
     # pipline = AutomaticIdentificationPipeline({"people_detector": people_detector})
+    tf.config.set_visible_devices([], 'GPU')
     baseline_cfg = ConfigReader("app/configs/baseline_pipeline_conf.yaml")
     pipline = AutomaticIdentificationPipeline(baseline_cfg)
 

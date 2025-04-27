@@ -55,10 +55,14 @@ class ImageDataset:
         recognizer_config = self.config.get_pipeline_step_config("face_recognizer")
         model_name = recognizer_config["name"]
         
-        if model_name == "ArcFace":
-            return 512
-        elif model_name == "VGG-Face":
+        if model_name == "VGG-Face":
             return 4096
+        elif model_name == "Facenet":
+            return 128
+        elif model_name == "Facenet512":
+            return 512
+        elif model_name == "ArcFace":
+            return 512
         elif model_name == "SFace":
             return 128
 

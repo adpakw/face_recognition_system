@@ -12,7 +12,9 @@ pipeline:
     model: "YuNet"
   
   face_recognizer:
-    model: VGG-Face
+    # model: VGG-Face
+    # model: Facenet
+    model: OpenFace
 
 general:
   output_dir: "baseline_results"
@@ -39,18 +41,47 @@ models:
     nms_threshold: 0.3
     top_k: 5000
     device: "cpu"
-    face_padding: 0.1
+    face_padding: 0.2
     confidence_threshold: 0.8
-
-  SFace:
-    device: "cuda"
-    confidence_threshold: 0.5
 
   VGG-Face:
     device: "cuda"
     confidence_threshold: 0.48
 
+  Facenet:
+    device: "cuda"
+    confidence_threshold: 0.7
+
+  Facenet512:
+    device: "cuda"
+    confidence_threshold: 0.7
+
+  OpenFace:
+    device: "cuda"
+    confidence_threshold: 0.48
+    
+  DeepFace:
+    device: "cuda"
+    confidence_threshold: 0.48
+
+  DeepID:
+    device: "cuda"
+    confidence_threshold: 0.48
+            
   ArcFace:
     device: "cuda"
+    confidence_threshold: 0.48
+
+  Dlib:
+    device: "cuda"
+    confidence_threshold: 0.48
+
+  SFace:
+    device: "cuda"
     confidence_threshold: 0.5
+
+  GhostFaceNet:
+    device: "cuda"
+    confidence_threshold: 0.5
+
 
