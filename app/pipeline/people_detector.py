@@ -10,27 +10,33 @@ from app.clients.video_processors.opencv_reader import OpenCVVideoReader
 from app.utils.config_reader import ConfigReader
 
 from app.models.ssd import SSD
-
+from app.models.yolo import YOLODetector
 
 class PeopleDetector:
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigReader] = None):
         """
-        Инициализация детектора людей
+        Трекер людей на основе BYTETracker
+        
+        Args:
+            config: Конфигурация трекера. Если None, используются значения по умолчанию.
         """
-        config = ConfigReader()
-            
+        if config is None:
+            config = ConfigReader()
+
         # Получаем конфиг для этапа people_detector
         detector_config = config.get_pipeline_step_config("people_detector")
         
         # Динамически выбираем модель на основе конфига
         model_name = config.get_config().pipeline["people_detector"].model
         self.detection_model = self._init_model(model_name, detector_config)
-        self.confidence_threshold = detector_config.get("confidence_threshold", 0.5)
+        self.confidence_threshold = detector_config["cfg"]["confidence_threshold"]
 
     def _init_model(self, model_name: str, config: Dict[str, Any]):
         """Инициализирует модель детекции на основе имени и конфига"""
         if model_name == "SSD":
             return SSD(device=config['cfg']["device"])
+        elif model_name == "Yolo":
+            return YOLODetector(device=config['cfg']["device"])
         else:
             raise ValueError(f"Unsupported people detection model: {model_name}")
 

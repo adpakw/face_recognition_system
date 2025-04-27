@@ -11,18 +11,19 @@ from app.pipeline.face_recognizer import FaceRecognizer
 
 
 class ImageDataset:
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigReader] = None):
         """
         Класс для работы с датасетом лиц
         """
-        self.config = ConfigReader()
+        if config is None:
+            self.config = ConfigReader()
+        else:
+            self.config = config
         self._init_paths()
         
-        # Инициализация зависимостей
         self.face_detector = FaceDetector()
         self.face_recognizer = FaceRecognizer()
         
-        # Инициализация Faiss
         self.dimensions = self._get_embedding_dimension()
         self.index = self._init_faiss_index()
         self.names = np.array([])
@@ -31,7 +32,6 @@ class ImageDataset:
 
     def _init_paths(self):
         """Инициализация путей из конфига"""
-        # Получаем словарь с общими настройками
         general_config = self.config.get_general_config()
         
         self.backup_dir = self._ensure_dir_exists(
@@ -52,14 +52,13 @@ class ImageDataset:
 
     def _get_embedding_dimension(self) -> int:
         """Определяет размерность эмбеддингов на основе модели"""
-        # Получаем конфиг распознавателя лиц как словарь
         recognizer_config = self.config.get_pipeline_step_config("face_recognizer")
         model_name = recognizer_config["name"]
         
         if model_name == "ArcFace":
             return 512
         elif model_name == "VGG-Face":
-            return 2622
+            return 4096
         elif model_name == "SFace":
             return 128
 
@@ -80,25 +79,20 @@ class ImageDataset:
             print("No new persons found!")
             return
 
-        # Преобразуем и проверяем эмбеддинги
         new_embs = np.array(new_embs).astype('float32')
         
-        # Проверка размерности
         if new_embs.size > 0 and new_embs.shape[1] != self.dimensions:
             print(f"Error: Expected embedding dimension {self.dimensions}, got {new_embs.shape[1]}")
             return
 
-        # Нормализация для косинусной схожести
         faiss.normalize_L2(new_embs)
         new_names = np.array(new_names)
 
-        # Проверка и обновление индекса
         if self.index.ntotal == 0:
             print(f"Adding new embeddings with shape: {new_embs.shape}")
             self.index.add(new_embs)
             self.names = new_names
         else:
-            # Проверка совместимости размерностей
             if new_embs.shape[1] != self.index.d:
                 print(f"Dimension mismatch: index expects {self.index.d}, got {new_embs.shape[1]}")
                 return
@@ -119,7 +113,6 @@ class ImageDataset:
         for person_name in os.listdir(self.add_persons_dir):
             person_dir = os.path.join(self.add_persons_dir, person_name)
             
-            # Пропускаем не-директории
             if not os.path.isdir(person_dir):
                 continue
                 
@@ -135,7 +128,6 @@ class ImageDataset:
                         print(f"Warning: Cannot read image {img_path}")
                         continue
 
-                    # Детекция лиц
                     h, w = img.shape[:2]
                     detection_result = self.face_detector.process(img, None)
                     
@@ -146,21 +138,17 @@ class ImageDataset:
                         bbox = face_info["face_bbox"]
                         face = img[bbox["y1"]:bbox["y2"], bbox["x1"]:bbox["x2"]]
                         
-                        # Проверка минимального размера лица
                         if face.shape[0] < 10 or face.shape[1] < 10:
                             continue
 
-                        # Сохранение лица
                         face_id = len(os.listdir(face_dir))
                         face_path = os.path.join(face_dir, f"{face_id}.jpg")
                         cv2.imwrite(face_path, face)
 
-                        # Извлечение эмбеддинга
                         embedding = self.face_recognizer.extract_embedding(
                             cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
                         )
                         
-                        # Проверка размерности
                         if embedding.shape[0] != self.dimensions:
                             print(f"Warning: Wrong embedding dimension {embedding.shape[0]} (expected {self.dimensions})")
                             continue

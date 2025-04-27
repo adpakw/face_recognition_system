@@ -1,5 +1,5 @@
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 import cv2
 from tqdm import tqdm
@@ -11,27 +11,31 @@ from app.pipeline.people_detector import PeopleDetector
 from app.pipeline.face_detector import FaceDetector
 from app.utils.config_reader import ConfigReader
 from app.pipeline.face_search import FaceSearchService
+from app.pipeline.person_tracker import PersonTracker
 
 
 class AutomaticIdentificationPipeline:
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigReader] = None):
         """
         :param processors: список обработчиков в порядке их выполнения
         """
-        self.config_reader = ConfigReader()
+        if config is None:
+            config = ConfigReader()
 
-        general_config = self.config_reader.get_general_config()
+        general_config = config.get_general_config()
         self.json_processor = JsonProcessor(
             output_root=general_config.output_dir, json_size=general_config.json_size
         )
 
-        self.people_detector: PeopleDetector = PeopleDetector(
-        )
+        self.output_dir = general_config.output_dir
 
-        self.face_detector: FaceDetector = FaceDetector(
-        )
+        self.people_detector: PeopleDetector = PeopleDetector(config)
 
-        self.face_searcher: FaceSearchService = FaceSearchService()
+        self.face_detector: FaceDetector = FaceDetector(config)
+
+        self.face_searcher: FaceSearchService = FaceSearchService(config)
+
+        # self.person_tracker = PersonTracker(config)
 
     def process_video(
         self,
@@ -53,7 +57,7 @@ class AutomaticIdentificationPipeline:
         :return: (список путей к JSON-файлам, информация о видео)
         """
         if save_video:
-            output_dir = Path("results")
+            output_dir = Path(f"{self.output_dir}/{Path(video_path).name[:-4]}")
             output_dir.mkdir(parents=True, exist_ok=True)
             output_path = output_dir / f"processed_{Path(video_path).name}"
 
@@ -130,12 +134,18 @@ class AutomaticIdentificationPipeline:
         # print(f"Generated {len(json_files)} JSON files:")
         # for file_path in json_files:
         #     print(f"- {file_path}")
-    
+
     def process_frame(self, frame, show_video):
         result_people_detector = self.people_detector.process(
             frame,
             show_video=show_video,
         )
+
+        # result_person_tracker = self.person_tracker.process(
+        #     result_people_detector["frame"],
+        #     result_people_detector["people_boxes"],
+        #     show_video,
+        # )
 
         result_face_detector = self.face_detector.process(
             frame=result_people_detector["frame"],
@@ -150,20 +160,6 @@ class AutomaticIdentificationPipeline:
         )
 
         return result_face_recognizer
-
-
-    def test_people_detector_video(self):
-        self.process_video(
-            "data/input_task.mp4", 60, show_video=True, save_in_json=True
-        )
-
-    def test_people_detector_video2(self):
-        self.process_video(
-            "datasets/videos/1080p_Видео_от_Записи_для_аналитики (5).mp4",
-            30,
-            show_video=True,
-            save_in_json=True,
-        )
 
     def draw_frame_number(self, frame, frame_num):
         """

@@ -8,19 +8,20 @@ from app.utils.config_reader import ConfigReader
 
 
 class FaceSearchService:
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigReader] = None):
         """
         Сервис для поиска, обработки и отрисовки лиц
         
         Args:
             config: Экземпляр ConfigReader. Если None, создаст новый
         """
-        self.config = ConfigReader()
-        self.dataset = ImageDataset()
-        self.recognizer = FaceRecognizer()
+        if config is None:
+            config = ConfigReader()
+        self.dataset = ImageDataset(config)
+        self.recognizer = FaceRecognizer(config)
         
         # Получаем порог уверенности из конфига
-        recognizer_config = self.config.get_pipeline_step_config("face_recognizer")
+        recognizer_config = config.get_pipeline_step_config("face_recognizer")
         self.threshold = recognizer_config["cfg"]["confidence_threshold"]
 
     def process(

@@ -1,7 +1,13 @@
 pipeline:
   people_detector:
-    model: "SSD"
-  
+    model: "Yolo"
+
+  # person_tracker:
+  #   track_thresh: 0.5  
+  #   track_buffer: 30   
+  #   match_thresh: 0.8  
+  #   frame_rate: 30
+
   face_detector:
     model: "YuNet"
   
@@ -9,7 +15,7 @@ pipeline:
     model: VGG-Face
 
 general:
-  output_dir: "results"
+  output_dir: "baseline_results"
   json_size: 524288
 
   backup_dir: "datasets/backup"
@@ -23,13 +29,17 @@ models:
     device: "cuda"
     confidence_threshold: 0.5
 
+  Yolo:
+    device: "cuda"
+    confidence_threshold: 0.7
+
   YuNet:
     model_path: "app/models/weights/face_detection_yunet_2023mar.onnx"
     score_threshold: 0.3
     nms_threshold: 0.3
     top_k: 5000
     device: "cpu"
-    face_padding: 0.3
+    face_padding: 0.1
     confidence_threshold: 0.8
 
   SFace:
@@ -38,8 +48,9 @@ models:
 
   VGG-Face:
     device: "cuda"
-    confidence_threshold: 0.5
+    confidence_threshold: 0.48
 
   ArcFace:
     device: "cuda"
     confidence_threshold: 0.5
+

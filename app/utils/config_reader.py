@@ -34,14 +34,14 @@ class GeneralConfig(BaseModel):
 
 
 class AppConfig(BaseModel):
-    pipeline: Dict[str, PipelineStep]  # Этапы пайплайна
+    pipeline: Dict[str, PipelineStep]
     general: GeneralConfig
-    models: Dict[str, Any]  # Конфиги всех моделей
+    models: Dict[str, Any]
 
 
 class ConfigReader:
-    def __init__(self, config_path: Path = Path("app/configs/pipeline_conf.yaml")):
-        self.config_path = config_path
+    def __init__(self, config_path: str = "app/configs/baseline_pipeline_conf.yaml"):
+        self.config_path = Path(config_path)
         self._config = self._load_and_validate()
 
     def _load_and_validate(self) -> AppConfig:
@@ -51,7 +51,6 @@ class ConfigReader:
         with open(self.config_path, 'r') as f:
             raw_config = yaml.safe_load(f)
         
-        # Конвертируем строковые пути в Path объекты
         if 'models' in raw_config:
             for model_name, model_config in raw_config['models'].items():
                 if 'model_path' in model_config:

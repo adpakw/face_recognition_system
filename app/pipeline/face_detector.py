@@ -8,11 +8,13 @@ from app.utils.config_reader import ConfigReader
 
 
 class FaceDetector:
-    def __init__(self):
+    def __init__(self, config: Optional[ConfigReader] = None
+):
         """
         Инициализация детектора лиц
         """
-        config = ConfigReader()
+        if config is None:
+            config = ConfigReader()
             
         # Получаем конфиг для этапа face_detector
         detector_config = config.get_pipeline_step_config("face_detector")
