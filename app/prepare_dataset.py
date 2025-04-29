@@ -1,6 +1,6 @@
 from app.clients.image_dataset import ImageDataset
 from app.models.yunet import YuNet
-from app.models.arcface import ArcFace
+# from app.models.arcface import ArcFace
 import tensorflow as tf
 import os
 

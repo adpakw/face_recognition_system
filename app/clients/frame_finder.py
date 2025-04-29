@@ -41,7 +41,7 @@ class FrameFinder:
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                for frame_data in data.get("frames", []):
+                for frame_data in data['frames']:
                     if frame_data["frame_number"] == target_frame:
                         return frame_data
                     if frame_data["frame_number"] > target_frame:

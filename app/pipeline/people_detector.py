@@ -9,7 +9,7 @@ from app.clients.json_processor import JsonProcessor
 from app.clients.video_processors.opencv_reader import OpenCVVideoReader
 from app.utils.config_reader import ConfigReader
 
-from app.models.ssd import SSD
+# from app.models.ssd import SSD
 from app.models.yolo import YOLODetector
 
 class PeopleDetector:
@@ -33,9 +33,9 @@ class PeopleDetector:
 
     def _init_model(self, model_name: str, config: Dict[str, Any]):
         """Инициализирует модель детекции на основе имени и конфига"""
-        if model_name == "SSD":
-            return SSD(device=config['cfg']["device"])
-        elif model_name == "Yolo":
+        # if model_name == "SSD":
+        #     return SSD(device=config['cfg']["device"])
+        if model_name == "Yolo":
             return YOLODetector(device=config['cfg']["device"])
         else:
             raise ValueError(f"Unsupported people detection model: {model_name}")

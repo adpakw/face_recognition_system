@@ -13,8 +13,8 @@ pipeline:
   
   face_recognizer:
     # model: VGG-Face
-    # model: Facenet
-    model: OpenFace
+    model: Facenet512
+    # model: OpenFace
 
 general:
   output_dir: "baseline_results"

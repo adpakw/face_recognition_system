@@ -21,8 +21,8 @@ class ImageDataset:
             self.config = config
         self._init_paths()
         
-        self.face_detector = FaceDetector()
-        self.face_recognizer = FaceRecognizer()
+        self.face_detector = FaceDetector(config)
+        self.face_recognizer = FaceRecognizer(config)
         
         self.dimensions = self._get_embedding_dimension()
         self.index = self._init_faiss_index()
