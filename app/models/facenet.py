@@ -1,18 +1,5 @@
 
 import tensorflow as tf
-# from keras.models import Model
-# from keras.layers import Activation
-# from keras.layers import BatchNormalization
-# from keras.layers import Concatenate
-# from keras.layers import Conv2D
-# from keras.layers import Dense
-# from keras.layers import Dropout
-# from keras.layers import GlobalAveragePooling2D
-# from keras.layers import Input
-# from keras.layers import Lambda
-# from keras.layers import MaxPooling2D
-# from keras.layers import add
-# from keras import backend as K
 
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Activation
@@ -52,7 +39,7 @@ class FaceNet128dClient:
         # Пример предобработки:
         img = cv2.resize(img, (160, 160))
         img = img.astype('float32')
-        img = (img - 127.5) / 128.0  # Нормализация для FaceNet
+        img = (img - 127.5) / 128.0  
         return np.expand_dims(img, axis=0)
 
 
@@ -62,7 +49,6 @@ class FaceNet512dClient:
     """
 
     def __init__(self):
-        # self.model = load_facenet512d_model()
         self.model = InceptionResNetV1(512)
         self.model.load_weights("app/models/weights/facenet512_weights.h5")
         self.model_name = "FaceNet-512d"
@@ -78,7 +64,7 @@ class FaceNet512dClient:
         # Пример предобработки:
         img = cv2.resize(img, (160, 160))
         img = img.astype('float32')
-        img = (img - 127.5) / 128.0  # Нормализация для FaceNet
+        img = (img - 127.5) / 128.0
         return np.expand_dims(img, axis=0)
 
 

@@ -14,7 +14,7 @@ def main():
 
     # pipline = AutomaticIdentificationPipeline({"people_detector": people_detector})
     tf.config.set_visible_devices([], 'GPU')
-    baseline_cfg = ConfigReader("app/configs/baseline_pipeline_conf.yaml")
+    baseline_cfg = ConfigReader("app/configs/pipeline_conf.yaml")
     pipline = AutomaticIdentificationPipeline(baseline_cfg)
 
     start = time.time()

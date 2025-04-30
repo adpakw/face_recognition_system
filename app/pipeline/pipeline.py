@@ -11,8 +11,9 @@ from app.pipeline.people_detector import PeopleDetector
 from app.pipeline.face_detector import FaceDetector
 from app.utils.config_reader import ConfigReader
 from app.pipeline.face_search import FaceSearchService
-from app.pipeline.person_tracker import PersonTracker
+from app.pipeline.postprocessor import PersonIDPostprocessor
 
+    
 
 class AutomaticIdentificationPipeline:
     def __init__(self, config: Optional[ConfigReader] = None):
@@ -35,7 +36,10 @@ class AutomaticIdentificationPipeline:
 
         self.face_searcher: FaceSearchService = FaceSearchService(config)
 
-        # self.person_tracker = PersonTracker(config)
+        self.postprocessor = PersonIDPostprocessor(
+            window_size=30
+        )
+
 
     def process_video(
         self,
@@ -141,12 +145,6 @@ class AutomaticIdentificationPipeline:
             show_video=show_video,
         )
 
-        # result_person_tracker = self.person_tracker.process(
-        #     result_people_detector["frame"],
-        #     result_people_detector["people_boxes"],
-        #     show_video,
-        # )
-
         result_face_detector = self.face_detector.process(
             frame=result_people_detector["frame"],
             people_bboxes=result_people_detector["people_boxes"],
@@ -159,6 +157,12 @@ class AutomaticIdentificationPipeline:
             show_video=show_video,
         )
 
+        result_face_recognizer["result_dicts"] = self.postprocessor.update(
+                result_face_recognizer["result_dicts"]
+            )
+        
+        result_face_recognizer["frame"] = self.postprocessor.draw_id(result_face_recognizer["frame"], result_face_recognizer["result_dicts"])
+
         return result_face_recognizer
 
     def draw_frame_number(self, frame, frame_num):
@@ -169,21 +173,18 @@ class AutomaticIdentificationPipeline:
         :param frame_num: номер кадра (int)
         :return: кадр с нарисованным номером
         """
-        # Параметры текста
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = 0.8
         font_thickness = 2
-        font_color = (0, 255, 0)  # Зеленый цвет (BGR)
+        font_color = (0, 255, 0)  
 
-        # Позиция текста (правый верхний угол с отступом)
         text = f"Frame: {frame_num}"
         text_size = cv2.getTextSize(text, font, font_scale, font_thickness)[0]
         text_x = (
             frame.shape[1] - text_size[0] - 20
-        )  # Отступ 20 пикселей от правого края
-        text_y = text_size[1] + 20  # Отступ 20 пикселей от верхнего края
+        ) 
+        text_y = text_size[1] + 20  
 
-        # Рисуем текст на кадре
         cv2.putText(
             frame,
             text,

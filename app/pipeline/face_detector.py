@@ -16,18 +16,14 @@ class FaceDetector:
         if config is None:
             config = ConfigReader()
             
-        # Получаем конфиг для этапа face_detector
         detector_config = config.get_pipeline_step_config("face_detector")
         
-        # Инициализируем модель на основе конфига
         model_name = config.get_config().pipeline["face_detector"].model
         self.detection_model = self._init_model(model_name, detector_config)
         
-        # Параметры обработки
         self.confidence_threshold = detector_config['cfg']["confidence_threshold"]
         self.face_padding = detector_config['cfg']["face_padding"]
         
-        # Сохраняем конфиг для возможного использования
         self.config = config
 
     def _init_model(self, model_name: str, config: Dict[str, Any]):
@@ -39,7 +35,6 @@ class FaceDetector:
                 nms_threshold=config['cfg']["nms_threshold"],
                 top_k=config['cfg']["top_k"]
             )
-        # Можно добавить другие модели детекции лиц
         else:
             raise ValueError(f"Unsupported face detection model: {model_name}")
 
@@ -67,11 +62,9 @@ class FaceDetector:
         result = {"frame": None, "result_dicts": []}
         
         if people_bboxes is None:
-            # Режим поиска лиц на всем изображении
             faces = self._detect_faces_on_frame(frame)
             result["result_dicts"] = [{"face_bbox": face} for face in faces]
         else:
-            # Режим поиска лиц внутри bbox людей
             result["result_dicts"] = self._detect_faces_in_people_bboxes(frame, people_bboxes)
 
         if show_video:
@@ -89,7 +82,6 @@ class FaceDetector:
             confidence_threshold=self.confidence_threshold,
         )
         
-        # Обработка и нормализация bbox
         processed_faces = []
         for face in faces:
             processed_face = self._process_face_bbox(face, (0, 0), frame.shape)
@@ -106,7 +98,6 @@ class FaceDetector:
         result = []
         
         for person_bbox in people_bboxes:
-            # Вырезаем область человека
             x1, y1, x2, y2 = person_bbox["x1"], person_bbox["y1"], person_bbox["x2"], person_bbox["y2"]
             person_img = frame[y1:y2, x1:x2]
 
@@ -114,7 +105,6 @@ class FaceDetector:
                 result.append({"person_bbox": person_bbox, "face_bbox": None})
                 continue
 
-            # Детекция лиц в области человека
             h, w = person_img.shape[:2]
             faces = self.detection_model.detect_faces(
                 person_img,
@@ -134,7 +124,6 @@ class FaceDetector:
         """Обработка и нормализация bounding box лица"""
         x_offset, y_offset = offset
         
-        # Преобразование к координатам оригинального изображения
         face_bbox = {
             "x1": face_bbox["x1"] + x_offset,
             "y1": face_bbox["y1"] + y_offset,
@@ -143,7 +132,6 @@ class FaceDetector:
             "score": face_bbox["score"]
         }
 
-        # Добавляем padding к размеру лица
         width = face_bbox["x2"] - face_bbox["x1"]
         height = face_bbox["y2"] - face_bbox["y1"]
         
@@ -155,7 +143,6 @@ class FaceDetector:
         face_bbox["x2"] += x_padding
         face_bbox["y2"] += y_padding
 
-        # Проверка границ изображения
         face_bbox["x1"] = max(0, min(face_bbox["x1"], frame_shape[1] - 1))
         face_bbox["y1"] = max(0, min(face_bbox["y1"], frame_shape[0] - 1))
         face_bbox["x2"] = max(0, min(face_bbox["x2"], frame_shape[1] - 1))
@@ -176,7 +163,6 @@ class FaceDetector:
         vis_image = image.copy()
 
         for face in faces:
-            # Рисуем bounding box
             cv2.rectangle(
                 vis_image,
                 (face["x1"], face["y1"]),
@@ -185,7 +171,6 @@ class FaceDetector:
                 thickness,
             )
 
-            # Добавляем confidence score
             label = f"{face['score']:.2f}"
             (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
             cv2.rectangle(

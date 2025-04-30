@@ -41,7 +41,6 @@ class FaceRecognizer:
     def extract_embedding(self, frame_rgb: np.ndarray) -> np.ndarray:
         """Извлекает эмбеддинг лица из bounding box"""
 
-        # return self.model.get_embeddings(frame_rgb)
         return self.model.get_embeddings(frame_rgb)
     
     def align_img_wrt_eyes(self, 
@@ -58,11 +57,9 @@ class FaceRecognizer:
         Returns:
             img (np.ndarray): aligned facial image
         """
-        # if eye could not be detected for the given image, return image itself
         if left_eye is None or right_eye is None:
             return img, 0
 
-        # sometimes unexpectedly detected images come with nil dimensions
         if img.shape[0] == 0 or img.shape[1] == 0:
             return img, 0
 

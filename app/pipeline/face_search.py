@@ -1,4 +1,3 @@
-# app/services/face_search.py
 import cv2
 import numpy as np
 from typing import Dict, List, Optional, Union
@@ -20,7 +19,6 @@ class FaceSearchService:
         self.dataset = ImageDataset(config)
         self.recognizer = FaceRecognizer(config)
         
-        # Получаем порог уверенности из конфига
         recognizer_config = config.get_pipeline_step_config("face_recognizer")
         self.threshold = recognizer_config["cfg"]["confidence_threshold"]
 
@@ -57,13 +55,10 @@ class FaceSearchService:
                 result["result_dicts"].append(person_data)
                 continue
 
-            # Извлекаем эмбеддинг лица
             face_emb = self._extract_face_embedding(frame_rgb, person["face_bbox"])
             
-            # Ищем совпадения
             scores, _, names = self.dataset.search(face_emb, threshold=self.threshold)
             
-            # Формируем результат
             person_data["person_id"] = {
                 "name": names[0] if len(names) > 0 else "unknown",
                 "score": float(scores[0]) if len(scores) > 0 else 0.0,
@@ -105,30 +100,25 @@ class FaceSearchService:
         f_x1, f_y1 = person["face_bbox"]["x1"], person["face_bbox"]["y1"]
         f_x2, f_y2 = person["face_bbox"]["x2"], person["face_bbox"]["y2"]
 
-        # Настройки отображения
-        person_color = (0, 255, 0)  # Зеленый для bbox человека
-        face_color = (0, 165, 255)  # Оранжевый для bbox лица
-        text_color = (0, 0, 0)      # Черный для текста
-        text_bg = (255, 255, 255)   # Белый фон текста
+        
+        person_color = (0, 255, 0)
+        face_color = (0, 165, 255)
+        text_color = (0, 0, 0)   
+        text_bg = (255, 255, 255)
 
-        # Рисуем bounding box человека
         cv2.rectangle(frame, (p_x1, p_y1), (p_x2, p_y2), person_color, 2)
         
-        # Рисуем bounding box лица
         cv2.rectangle(frame, (f_x1, f_y1), (f_x2, f_y2), face_color, 2)
 
-        # Формируем текст
         person_id = person["person_id"]
         if person_id["match"]:
             text = f"{person_id['name']} ({person_id['score']:.2f})"
         else:
             text = "Unknown"
 
-        # Позиция текста (над bbox человека)
         (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
         text_y = max(p_y1 - 10, text_h + 5)
         
-        # Рисуем текст
         cv2.putText(
             frame,
             text,
