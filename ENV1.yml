@@ -1,0 +1,7 @@
+name: py311_
+channels:
+  - defaults
+dependencies:
+  - python=3.11
+  - anaconda::tensorflow-gpu
+  - conda-forge::ultralytics

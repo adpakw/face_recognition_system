@@ -1,12 +1,10 @@
 from app.clients.image_dataset import ImageDataset
-from app.models.yunet import YuNet
-# from app.models.arcface import ArcFace
+from app.utils.config_reader import ConfigReader
 import tensorflow as tf
-import os
 
 def main():
-    tf.config.set_visible_devices([], 'GPU')
-    image_dataset = ImageDataset()
+    config = ConfigReader("app/configs/pipeline_conf.yaml")
+    image_dataset = ImageDataset(config)
     image_dataset.add_persons()
 
     print(image_dataset.read_features())

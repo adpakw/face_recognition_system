@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:14
+    env_file: .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT}:5432"
+
+  # api:
+  #   build: .
+  #   env_file: .env
+  #   ports:
+  #     - "${API_PORT}:8000"
+  #   depends_on:
+  #     - postgres
+  #     - rabbitmq
+
+  # worker:
+  #   build: .
+  #   env_file: .env
+  #   command: bash -c "conda activate py311 && celery -A tasks worker --loglevel=info"
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]
+  #   runtime: nvidia
+  #   depends_on:
+  #     - postgres
+  test:
+    image: nvidia/cuda:12.4.0-runtime-ubuntu22.04
+    command: nvidia-smi
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+
+volumes:
+  postgres_data:

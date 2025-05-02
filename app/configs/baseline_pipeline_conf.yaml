@@ -27,10 +27,6 @@ general:
   gpu_id: 0
 
 models:
-  SSD:
-    device: "cuda"
-    confidence_threshold: 0.5
-
   Yolo:
     device: "cuda"
     confidence_threshold: 0.7

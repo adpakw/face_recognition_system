@@ -3,8 +3,6 @@ import numpy as np
 from app.utils.config_reader import ConfigReader
 from app.models.facenet import FaceNet128dClient, FaceNet512dClient
 # from app.models.vgg_face import VGG_16
-from app.models.sface import SFace
-# from deepface import DeepFace
 import cv2
 
 class FaceRecognizer:
@@ -33,8 +31,6 @@ class FaceRecognizer:
         elif model_name == "VGG-Face":
             # self.model = VGG_16(device)
             pass
-        elif model_name == "SFace":
-            self.model = SFace(device)
         else:
             raise ValueError(f"Unsupported face recognition model: {model_name}")
 
