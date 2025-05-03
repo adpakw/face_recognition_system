@@ -8,5 +8,4 @@ __pycache__
 *.pth
 *.t7
 *.onnx
-datasets
 weights
