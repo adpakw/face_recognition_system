@@ -59,7 +59,7 @@ class FaceDetector:
                 "result_dicts": список словарей с информацией о найденных лицах
             }
         """
-        result = {"frame": None, "result_dicts": []}
+        result = {"frame": frame, "result_dicts": []}
         
         if people_bboxes is None:
             faces = self._detect_faces_on_frame(frame)

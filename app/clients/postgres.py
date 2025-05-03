@@ -35,7 +35,7 @@ class PostgreSQLClient:
         """Установка соединения с БД"""
         try:
             self.conn = psycopg2.connect(**self.connection_params)
-            print("Успешное подключение к PostgreSQL")
+            # print("Успешное подключение к PostgreSQL")
         except Exception as e:
             print(f"Ошибка подключения к PostgreSQL: {e}")
             raise
@@ -44,7 +44,7 @@ class PostgreSQLClient:
         """Закрытие соединения с БД"""
         if self.conn is not None:
             self.conn.close()
-            print("Соединение с PostgreSQL закрыто")
+            # print("Соединение с PostgreSQL закрыто")
             
     def execute_query(self, query: Union[str, sql.Composed], params: Optional[tuple] = None, 
                      return_df: bool = True) -> Optional[pd.DataFrame]:

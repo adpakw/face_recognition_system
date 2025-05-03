@@ -43,7 +43,7 @@ class FaceSearchService:
                 "result_dicts": список словарей с информацией о распознанных лицах
             }
         """
-        result = {"frame": None, "result_dicts": []}
+        result = {"frame": frame, "result_dicts": []}
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         output_frame = frame.copy()
 

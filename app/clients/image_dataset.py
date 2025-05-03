@@ -8,7 +8,7 @@ from pathlib import Path
 from app.utils.config_reader import ConfigReader
 from app.pipeline.face_detector import FaceDetector
 from app.pipeline.face_recognizer import FaceRecognizer
-
+import torch
 
 class ImageDataset:
     def __init__(self, config: Optional[ConfigReader] = None):
@@ -70,7 +70,11 @@ class ImageDataset:
         """Инициализирует Faiss индекс"""
         index = faiss.IndexFlatIP(self.dimensions)
         gpu_id = self.config.get_general_config().gpu_id
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
         res = faiss.StandardGpuResources()
+        res.setTempMemory(3 * 1024 * 1024 * 1024)
         return faiss.index_cpu_to_gpu(res, gpu_id, index)
 
     def add_persons(self) -> None:

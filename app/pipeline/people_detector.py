@@ -69,7 +69,7 @@ class PeopleDetector:
 
     def process(self, frame, show_video=False):
         """Обработка одного кадра"""
-        result = {"frame": None, "people_boxes": None}
+        result = {"frame": frame, "people_boxes": None}
 
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         result["people_boxes"] = self.detection_model.detect_people(
