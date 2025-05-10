@@ -3,3 +3,6 @@ run:
 
 pd:
 	python -m app.prepare_dataset
+
+test:
+	python -m app.test

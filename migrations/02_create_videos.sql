@@ -5,5 +5,6 @@ CREATE TABLE IF NOT EXISTS videos (
     height INT NOT NULL,
     total_frames INT NOT NULL,
     duration FLOAT NOT NULL,
-    processing_date TIMESTAMP NOT NULL
+    processing_date TIMESTAMP NOT NULL,
+    status_of_processing TEXT NOT NULL
 );

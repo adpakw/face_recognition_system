@@ -8,7 +8,7 @@ class YuNet:
         model_path: str = "app/models/weights/face_detection_yunet_2023mar.onnx",
         score_threshold=0.3,
         nms_threshold=0.3,
-        top_k=5000
+        top_k=5000,
     ):
         """
         Инициализация детектора лиц с YuNet
@@ -28,9 +28,9 @@ class YuNet:
             target_id=cv2.dnn.DNN_TARGET_CPU,
         )
 
-        print(f"YuNet face detector initialized on \"CPU\" device")
+        print(f'YuNet face detector initialized on "CPU" device')
 
-    def detect_faces(self, image, input_size = (320, 320), confidence_threshold=0.7):
+    def detect_faces(self, image, input_size=(320, 320), confidence_threshold=0.7):
         """
         Детектирование лиц в области человека
 
@@ -42,26 +42,17 @@ class YuNet:
         Returns:
             list: Список обнаруженных лиц в формате [{'x1', 'y1', 'x2', 'y2', 'score'}, ...]
                   Координаты приведены к оригинальному изображению
-        # """
-        self.model.setInputSize(input_size)  # Обновляем размер входного изображения
+        #"""
+        self.model.setInputSize(input_size)
 
-        # Детекция лиц
         _, faces = self.model.detect(image)
         if faces is None:
             return []
 
-        # Преобразование координат к оригинальному изображению
         detected_faces = []
         for face in faces:
             if face[-1] < confidence_threshold:  # face[-1] - confidence score
                 continue
-            
-            # landmarks = face[4:14].reshape(5, 2).astype(int)
-            
-            # if not self._validate_landmarks(landmarks, input_size):
-            #     continue  # Пропускаем лица с плохими landmarks
-
-            # Координаты лица относительно вырезанного изображения
             fx1, fy1, fw, fh = map(int, face[:4])
             fx2, fy2 = fx1 + fw, fy1 + fh
 
@@ -70,31 +61,3 @@ class YuNet:
             )
 
         return detected_faces
-
-    def _validate_landmarks(self, landmarks: np.ndarray, input_size) -> bool:
-        """Проверка качества landmarks"""
-        if landmarks.shape != (5, 2):
-            return False
-        
-        width, height = input_size
-        x_valid = np.all((landmarks[:, 0] >= 0) & (landmarks[:, 0] <= width))
-        y_valid = np.all((landmarks[:, 1] >= 0) & (landmarks[:, 1] <= height))
-        
-        if not (x_valid and y_valid):
-            return False
-        
-        left_eye = landmarks[0]
-        right_eye = landmarks[1]
-        eye_dist = np.linalg.norm(right_eye - left_eye)
-        
-        # Эмпирически определяем минимальное расстояние (5% от ширины изображения)
-        min_eye_dist = 0.05 * width
-        
-        if eye_dist < min_eye_dist:
-            return False
-            
-        # Проверка на минимальное расстояние между точками
-        if len(np.unique(landmarks, axis=0)) < 5:
-            return False
-            
-        return True

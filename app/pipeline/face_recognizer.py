@@ -1,8 +1,9 @@
 from typing import Dict, Any,Optional, Union, Tuple
 import numpy as np
 from app.utils.config_reader import ConfigReader
-from app.models.facenet import FaceNet128dClient, FaceNet512dClient
-# from app.models.vgg_face import VGG_16
+from app.models.facenet import FaceNet512dClient
+from app.models.vggface import VggFaceClient
+from app.models.arcface import ArcFaceClient
 import cv2
 
 class FaceRecognizer:
@@ -15,22 +16,16 @@ class FaceRecognizer:
         recognizer_config = config.get_pipeline_step_config("face_recognizer")
         self.model_name = config.get_config().pipeline["face_recognizer"].model
         self._init_model(self.model_name, recognizer_config)
-        models = [
-            "VGG-Face", "Facenet", "Facenet512", "OpenFace", "DeepFace",
-            "DeepID", "ArcFace", "Dlib", "SFace", "GhostFaceNet",
-            "Buffalo_L",
-        ]
 
     def _init_model(self, model_name: str, config: Dict[str, Any]):
         device = config['cfg']["device"]
         
-        if model_name == "Facenet":
-            self.model = FaceNet128dClient()
+        if model_name == "ArcFace":
+            self.model = ArcFaceClient()
         elif model_name == "Facenet512":
             self.model = FaceNet512dClient()
         elif model_name == "VGG-Face":
-            # self.model = VGG_16(device)
-            pass
+            self.model = VggFaceClient()
         else:
             raise ValueError(f"Unsupported face recognition model: {model_name}")
 

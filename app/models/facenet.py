@@ -1,46 +1,8 @@
-
-import tensorflow as tf
-
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Activation
-from tensorflow.keras.layers import BatchNormalization
-from tensorflow.keras.layers import Concatenate
-from tensorflow.keras.layers import Conv2D
-from tensorflow.keras.layers import Dense
-from tensorflow.keras.layers import Dropout
-from tensorflow.keras.layers import GlobalAveragePooling2D
-from tensorflow.keras.layers import Input
-from tensorflow.keras.layers import Lambda
-from tensorflow.keras.layers import MaxPooling2D
-from tensorflow.keras.layers import add
-from tensorflow.keras import backend as K
-import numpy as np
 import cv2
-
-class FaceNet128dClient:
-    """
-    FaceNet-128d model class
-    """
-
-    def __init__(self):
-        self.model = InceptionResNetV1()
-        self.model.load_weights("app/models/weights/facenet_weights.h5")
-        self.model_name = "FaceNet-128d"
-        self.input_shape = (160, 160)
-        self.output_shape = 128
-
-    def get_embeddings(self, img):
-        # with tf.device('/GPU:0'):
-            return self.model.predict(self.preprocess(img), verbose=0).flatten()
-
-    
-    def preprocess(self, img: np.ndarray) -> np.ndarray:
-        """Предобработка изображения"""
-        # Пример предобработки:
-        img = cv2.resize(img, (160, 160))
-        img = img.astype('float32')
-        img = (img - 127.5) / 128.0  
-        return np.expand_dims(img, axis=0)
+import numpy as np
+import torch
+from torch import nn
+from torch.nn import functional as F
 
 
 class FaceNet512dClient:
@@ -49,1609 +11,330 @@ class FaceNet512dClient:
     """
 
     def __init__(self):
-        self.model = InceptionResNetV1(512)
-        self.model.load_weights("app/models/weights/facenet512_weights.h5")
-        self.model_name = "FaceNet-512d"
+        self.model = InceptionResnetV1("vggface2", False, device="cuda")
+        self.model.eval()
         self.input_shape = (160, 160)
-        self.output_shape = 512
 
     def get_embeddings(self, img):
-        # with tf.device('/GPU:0'):
-            return self.model.predict(self.preprocess(img), verbose=0).flatten()
+        input_tensor = torch.from_numpy(self.preprocess(img)).float().to("cuda")
+
+        with torch.no_grad():
+            embeddings = self.model.forward(input_tensor)
+
+        return embeddings.flatten().cpu().detach().numpy()
 
     def preprocess(self, img: np.ndarray) -> np.ndarray:
-        """Предобработка изображения"""
-        # Пример предобработки:
-        img = cv2.resize(img, (160, 160))
-        img = img.astype('float32')
+        """Preprocess the image"""
+        img = cv2.resize(img, self.input_shape)
+        img = img.astype("float32")
         img = (img - 127.5) / 128.0
+
+        img = np.transpose(img, (2, 0, 1))  # HWC to CHW
         return np.expand_dims(img, axis=0)
 
 
-def scaling(x, scale):
-    return x * scale
+class BasicConv2d(nn.Module):
+
+    def __init__(self, in_planes, out_planes, kernel_size, stride, padding=0):
+        super().__init__()
+        self.conv = nn.Conv2d(
+            in_planes,
+            out_planes,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            bias=False,
+        )  # verify bias false
+        self.bn = nn.BatchNorm2d(
+            out_planes,
+            eps=0.001,  # value found in tensorflow
+            momentum=0.1,  # default pytorch value
+            affine=True,
+        )
+        self.relu = nn.ReLU(inplace=False)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        return x
 
 
-def InceptionResNetV1(dimension: int = 128) -> Model:
+class Block35(nn.Module):
+
+    def __init__(self, scale=1.0):
+        super().__init__()
+
+        self.scale = scale
+
+        self.branch0 = BasicConv2d(256, 32, kernel_size=1, stride=1)
+
+        self.branch1 = nn.Sequential(
+            BasicConv2d(256, 32, kernel_size=1, stride=1),
+            BasicConv2d(32, 32, kernel_size=3, stride=1, padding=1),
+        )
+
+        self.branch2 = nn.Sequential(
+            BasicConv2d(256, 32, kernel_size=1, stride=1),
+            BasicConv2d(32, 32, kernel_size=3, stride=1, padding=1),
+            BasicConv2d(32, 32, kernel_size=3, stride=1, padding=1),
+        )
+
+        self.conv2d = nn.Conv2d(96, 256, kernel_size=1, stride=1)
+        self.relu = nn.ReLU(inplace=False)
+
+    def forward(self, x):
+        x0 = self.branch0(x)
+        x1 = self.branch1(x)
+        x2 = self.branch2(x)
+        out = torch.cat((x0, x1, x2), 1)
+        out = self.conv2d(out)
+        out = out * self.scale + x
+        out = self.relu(out)
+        return out
+
+
+class Block17(nn.Module):
+
+    def __init__(self, scale=1.0):
+        super().__init__()
+
+        self.scale = scale
+
+        self.branch0 = BasicConv2d(896, 128, kernel_size=1, stride=1)
+
+        self.branch1 = nn.Sequential(
+            BasicConv2d(896, 128, kernel_size=1, stride=1),
+            BasicConv2d(128, 128, kernel_size=(1, 7), stride=1, padding=(0, 3)),
+            BasicConv2d(128, 128, kernel_size=(7, 1), stride=1, padding=(3, 0)),
+        )
+
+        self.conv2d = nn.Conv2d(256, 896, kernel_size=1, stride=1)
+        self.relu = nn.ReLU(inplace=False)
+
+    def forward(self, x):
+        x0 = self.branch0(x)
+        x1 = self.branch1(x)
+        out = torch.cat((x0, x1), 1)
+        out = self.conv2d(out)
+        out = out * self.scale + x
+        out = self.relu(out)
+        return out
+
+
+class Block8(nn.Module):
+
+    def __init__(self, scale=1.0, noReLU=False):
+        super().__init__()
+
+        self.scale = scale
+        self.noReLU = noReLU
+
+        self.branch0 = BasicConv2d(1792, 192, kernel_size=1, stride=1)
+
+        self.branch1 = nn.Sequential(
+            BasicConv2d(1792, 192, kernel_size=1, stride=1),
+            BasicConv2d(192, 192, kernel_size=(1, 3), stride=1, padding=(0, 1)),
+            BasicConv2d(192, 192, kernel_size=(3, 1), stride=1, padding=(1, 0)),
+        )
+
+        self.conv2d = nn.Conv2d(384, 1792, kernel_size=1, stride=1)
+        if not self.noReLU:
+            self.relu = nn.ReLU(inplace=False)
+
+    def forward(self, x):
+        x0 = self.branch0(x)
+        x1 = self.branch1(x)
+        out = torch.cat((x0, x1), 1)
+        out = self.conv2d(out)
+        out = out * self.scale + x
+        if not self.noReLU:
+            out = self.relu(out)
+        return out
+
+
+class Mixed_6a(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+        self.branch0 = BasicConv2d(256, 384, kernel_size=3, stride=2)
+
+        self.branch1 = nn.Sequential(
+            BasicConv2d(256, 192, kernel_size=1, stride=1),
+            BasicConv2d(192, 192, kernel_size=3, stride=1, padding=1),
+            BasicConv2d(192, 256, kernel_size=3, stride=2),
+        )
+
+        self.branch2 = nn.MaxPool2d(3, stride=2)
+
+    def forward(self, x):
+        x0 = self.branch0(x)
+        x1 = self.branch1(x)
+        x2 = self.branch2(x)
+        out = torch.cat((x0, x1, x2), 1)
+        return out
+
+
+class Mixed_7a(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+        self.branch0 = nn.Sequential(
+            BasicConv2d(896, 256, kernel_size=1, stride=1),
+            BasicConv2d(256, 384, kernel_size=3, stride=2),
+        )
+
+        self.branch1 = nn.Sequential(
+            BasicConv2d(896, 256, kernel_size=1, stride=1),
+            BasicConv2d(256, 256, kernel_size=3, stride=2),
+        )
+
+        self.branch2 = nn.Sequential(
+            BasicConv2d(896, 256, kernel_size=1, stride=1),
+            BasicConv2d(256, 256, kernel_size=3, stride=1, padding=1),
+            BasicConv2d(256, 256, kernel_size=3, stride=2),
+        )
+
+        self.branch3 = nn.MaxPool2d(3, stride=2)
+
+    def forward(self, x):
+        x0 = self.branch0(x)
+        x1 = self.branch1(x)
+        x2 = self.branch2(x)
+        x3 = self.branch3(x)
+        out = torch.cat((x0, x1, x2, x3), 1)
+        return out
+
+
+class InceptionResnetV1(nn.Module):
+    """Inception Resnet V1 model with optional loading of pretrained weights.
+
+    Model parameters can be loaded based on pretraining on the VGGFace2 or CASIA-Webface
+    datasets. Pretrained state_dicts are automatically downloaded on model instantiation if
+    requested and cached in the torch cache. Subsequent instantiations use the cache rather than
+    redownloading.
+
+    Keyword Arguments:
+        pretrained {str} -- Optional pretraining dataset. Either 'vggface2' or 'casia-webface'.
+            (default: {None})
+        classify {bool} -- Whether the model should output classification probabilities or feature
+            embeddings. (default: {False})
+        num_classes {int} -- Number of output classes. If 'pretrained' is set and num_classes not
+            equal to that used for the pretrained model, the final linear layer will be randomly
+            initialized. (default: {None})
+        dropout_prob {float} -- Dropout probability. (default: {0.6})
     """
-    InceptionResNetV1 model heavily inspired from
-    github.com/davidsandberg/facenet/blob/master/src/models/inception_resnet_v1.py
-    As mentioned in Sandberg's repo's readme, pre-trained models are using Inception ResNet v1
-    Besides training process is documented at
-    sefiks.com/2018/09/03/face-recognition-with-facenet-in-keras/
 
-    Args:
-        dimension (int): number of dimensions in the embedding layer
-    Returns:
-        model (Model)
-    """
+    def __init__(
+        self,
+        pretrained=None,
+        classify=False,
+        num_classes=None,
+        dropout_prob=0.6,
+        device=None,
+    ):
+        super().__init__()
 
-    inputs = Input(shape=(160, 160, 3))
-    x = Conv2D(32, 3, strides=2, padding="valid", use_bias=False, name="Conv2d_1a_3x3")(inputs)
-    x = BatchNormalization(
-        axis=3, momentum=0.995, epsilon=0.001, scale=False, name="Conv2d_1a_3x3_BatchNorm"
-    )(x)
-    x = Activation("relu", name="Conv2d_1a_3x3_Activation")(x)
-    x = Conv2D(32, 3, strides=1, padding="valid", use_bias=False, name="Conv2d_2a_3x3")(x)
-    x = BatchNormalization(
-        axis=3, momentum=0.995, epsilon=0.001, scale=False, name="Conv2d_2a_3x3_BatchNorm"
-    )(x)
-    x = Activation("relu", name="Conv2d_2a_3x3_Activation")(x)
-    x = Conv2D(64, 3, strides=1, padding="same", use_bias=False, name="Conv2d_2b_3x3")(x)
-    x = BatchNormalization(
-        axis=3, momentum=0.995, epsilon=0.001, scale=False, name="Conv2d_2b_3x3_BatchNorm"
-    )(x)
-    x = Activation("relu", name="Conv2d_2b_3x3_Activation")(x)
-    x = MaxPooling2D(3, strides=2, name="MaxPool_3a_3x3")(x)
-    x = Conv2D(80, 1, strides=1, padding="valid", use_bias=False, name="Conv2d_3b_1x1")(x)
-    x = BatchNormalization(
-        axis=3, momentum=0.995, epsilon=0.001, scale=False, name="Conv2d_3b_1x1_BatchNorm"
-    )(x)
-    x = Activation("relu", name="Conv2d_3b_1x1_Activation")(x)
-    x = Conv2D(192, 3, strides=1, padding="valid", use_bias=False, name="Conv2d_4a_3x3")(x)
-    x = BatchNormalization(
-        axis=3, momentum=0.995, epsilon=0.001, scale=False, name="Conv2d_4a_3x3_BatchNorm"
-    )(x)
-    x = Activation("relu", name="Conv2d_4a_3x3_Activation")(x)
-    x = Conv2D(256, 3, strides=2, padding="valid", use_bias=False, name="Conv2d_4b_3x3")(x)
-    x = BatchNormalization(
-        axis=3, momentum=0.995, epsilon=0.001, scale=False, name="Conv2d_4b_3x3_BatchNorm"
-    )(x)
-    x = Activation("relu", name="Conv2d_4b_3x3_Activation")(x)
+        # Set simple attributes
+        self.pretrained = pretrained
+        self.classify = classify
+        self.num_classes = num_classes
 
-    # 5x Block35 (Inception-ResNet-A block):
-    branch_0 = Conv2D(
-        32, 1, strides=1, padding="same", use_bias=False, name="Block35_1_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_1_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block35_1_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        32, 1, strides=1, padding="same", use_bias=False, name="Block35_1_Branch_1_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_1_Branch_1_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block35_1_Branch_1_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        32, 3, strides=1, padding="same", use_bias=False, name="Block35_1_Branch_1_Conv2d_0b_3x3"
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_1_Branch_1_Conv2d_0b_3x3_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block35_1_Branch_1_Conv2d_0b_3x3_Activation")(branch_1)
-    branch_2 = Conv2D(
-        32, 1, strides=1, padding="same", use_bias=False, name="Block35_1_Branch_2_Conv2d_0a_1x1"
-    )(x)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_1_Branch_2_Conv2d_0a_1x1_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Block35_1_Branch_2_Conv2d_0a_1x1_Activation")(branch_2)
-    branch_2 = Conv2D(
-        32, 3, strides=1, padding="same", use_bias=False, name="Block35_1_Branch_2_Conv2d_0b_3x3"
-    )(branch_2)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_1_Branch_2_Conv2d_0b_3x3_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Block35_1_Branch_2_Conv2d_0b_3x3_Activation")(branch_2)
-    branch_2 = Conv2D(
-        32, 3, strides=1, padding="same", use_bias=False, name="Block35_1_Branch_2_Conv2d_0c_3x3"
-    )(branch_2)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_1_Branch_2_Conv2d_0c_3x3_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Block35_1_Branch_2_Conv2d_0c_3x3_Activation")(branch_2)
-    branches = [branch_0, branch_1, branch_2]
-    mixed = Concatenate(axis=3, name="Block35_1_Concatenate")(branches)
-    up = Conv2D(256, 1, strides=1, padding="same", use_bias=True, name="Block35_1_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.17})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block35_1_Activation")(x)
+        if pretrained == "vggface2":
+            tmp_classes = 8631
+        elif pretrained == "casia-webface":
+            tmp_classes = 10575
+        elif pretrained is None and self.classify and self.num_classes is None:
+            raise Exception(
+                'If "pretrained" is not specified and "classify" is True, "num_classes" must be specified'
+            )
 
-    branch_0 = Conv2D(
-        32, 1, strides=1, padding="same", use_bias=False, name="Block35_2_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_2_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block35_2_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        32, 1, strides=1, padding="same", use_bias=False, name="Block35_2_Branch_1_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_2_Branch_1_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block35_2_Branch_1_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        32, 3, strides=1, padding="same", use_bias=False, name="Block35_2_Branch_1_Conv2d_0b_3x3"
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_2_Branch_1_Conv2d_0b_3x3_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block35_2_Branch_1_Conv2d_0b_3x3_Activation")(branch_1)
-    branch_2 = Conv2D(
-        32, 1, strides=1, padding="same", use_bias=False, name="Block35_2_Branch_2_Conv2d_0a_1x1"
-    )(x)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_2_Branch_2_Conv2d_0a_1x1_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Block35_2_Branch_2_Conv2d_0a_1x1_Activation")(branch_2)
-    branch_2 = Conv2D(
-        32, 3, strides=1, padding="same", use_bias=False, name="Block35_2_Branch_2_Conv2d_0b_3x3"
-    )(branch_2)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_2_Branch_2_Conv2d_0b_3x3_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Block35_2_Branch_2_Conv2d_0b_3x3_Activation")(branch_2)
-    branch_2 = Conv2D(
-        32, 3, strides=1, padding="same", use_bias=False, name="Block35_2_Branch_2_Conv2d_0c_3x3"
-    )(branch_2)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_2_Branch_2_Conv2d_0c_3x3_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Block35_2_Branch_2_Conv2d_0c_3x3_Activation")(branch_2)
-    branches = [branch_0, branch_1, branch_2]
-    mixed = Concatenate(axis=3, name="Block35_2_Concatenate")(branches)
-    up = Conv2D(256, 1, strides=1, padding="same", use_bias=True, name="Block35_2_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.17})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block35_2_Activation")(x)
+        # Define layers
+        self.conv2d_1a = BasicConv2d(3, 32, kernel_size=3, stride=2)
+        self.conv2d_2a = BasicConv2d(32, 32, kernel_size=3, stride=1)
+        self.conv2d_2b = BasicConv2d(32, 64, kernel_size=3, stride=1, padding=1)
+        self.maxpool_3a = nn.MaxPool2d(3, stride=2)
+        self.conv2d_3b = BasicConv2d(64, 80, kernel_size=1, stride=1)
+        self.conv2d_4a = BasicConv2d(80, 192, kernel_size=3, stride=1)
+        self.conv2d_4b = BasicConv2d(192, 256, kernel_size=3, stride=2)
+        self.repeat_1 = nn.Sequential(
+            Block35(scale=0.17),
+            Block35(scale=0.17),
+            Block35(scale=0.17),
+            Block35(scale=0.17),
+            Block35(scale=0.17),
+        )
+        self.mixed_6a = Mixed_6a()
+        self.repeat_2 = nn.Sequential(
+            Block17(scale=0.10),
+            Block17(scale=0.10),
+            Block17(scale=0.10),
+            Block17(scale=0.10),
+            Block17(scale=0.10),
+            Block17(scale=0.10),
+            Block17(scale=0.10),
+            Block17(scale=0.10),
+            Block17(scale=0.10),
+            Block17(scale=0.10),
+        )
+        self.mixed_7a = Mixed_7a()
+        self.repeat_3 = nn.Sequential(
+            Block8(scale=0.20),
+            Block8(scale=0.20),
+            Block8(scale=0.20),
+            Block8(scale=0.20),
+            Block8(scale=0.20),
+        )
+        self.block8 = Block8(noReLU=True)
+        self.avgpool_1a = nn.AdaptiveAvgPool2d(1)
+        self.dropout = nn.Dropout(dropout_prob)
+        self.last_linear = nn.Linear(1792, 512, bias=False)
+        self.last_bn = nn.BatchNorm1d(512, eps=0.001, momentum=0.1, affine=True)
 
-    branch_0 = Conv2D(
-        32, 1, strides=1, padding="same", use_bias=False, name="Block35_3_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_3_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block35_3_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        32, 1, strides=1, padding="same", use_bias=False, name="Block35_3_Branch_1_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_3_Branch_1_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block35_3_Branch_1_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        32, 3, strides=1, padding="same", use_bias=False, name="Block35_3_Branch_1_Conv2d_0b_3x3"
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_3_Branch_1_Conv2d_0b_3x3_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block35_3_Branch_1_Conv2d_0b_3x3_Activation")(branch_1)
-    branch_2 = Conv2D(
-        32, 1, strides=1, padding="same", use_bias=False, name="Block35_3_Branch_2_Conv2d_0a_1x1"
-    )(x)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_3_Branch_2_Conv2d_0a_1x1_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Block35_3_Branch_2_Conv2d_0a_1x1_Activation")(branch_2)
-    branch_2 = Conv2D(
-        32, 3, strides=1, padding="same", use_bias=False, name="Block35_3_Branch_2_Conv2d_0b_3x3"
-    )(branch_2)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_3_Branch_2_Conv2d_0b_3x3_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Block35_3_Branch_2_Conv2d_0b_3x3_Activation")(branch_2)
-    branch_2 = Conv2D(
-        32, 3, strides=1, padding="same", use_bias=False, name="Block35_3_Branch_2_Conv2d_0c_3x3"
-    )(branch_2)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_3_Branch_2_Conv2d_0c_3x3_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Block35_3_Branch_2_Conv2d_0c_3x3_Activation")(branch_2)
-    branches = [branch_0, branch_1, branch_2]
-    mixed = Concatenate(axis=3, name="Block35_3_Concatenate")(branches)
-    up = Conv2D(256, 1, strides=1, padding="same", use_bias=True, name="Block35_3_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.17})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block35_3_Activation")(x)
+        if pretrained is not None:
+            self.logits = nn.Linear(512, tmp_classes)
+            self.load_state_dict(
+                torch.load("app/models/weights/20180402-114759-vggface2.pt")
+            )
 
-    branch_0 = Conv2D(
-        32, 1, strides=1, padding="same", use_bias=False, name="Block35_4_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_4_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block35_4_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        32, 1, strides=1, padding="same", use_bias=False, name="Block35_4_Branch_1_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_4_Branch_1_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block35_4_Branch_1_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        32, 3, strides=1, padding="same", use_bias=False, name="Block35_4_Branch_1_Conv2d_0b_3x3"
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_4_Branch_1_Conv2d_0b_3x3_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block35_4_Branch_1_Conv2d_0b_3x3_Activation")(branch_1)
-    branch_2 = Conv2D(
-        32, 1, strides=1, padding="same", use_bias=False, name="Block35_4_Branch_2_Conv2d_0a_1x1"
-    )(x)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_4_Branch_2_Conv2d_0a_1x1_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Block35_4_Branch_2_Conv2d_0a_1x1_Activation")(branch_2)
-    branch_2 = Conv2D(
-        32, 3, strides=1, padding="same", use_bias=False, name="Block35_4_Branch_2_Conv2d_0b_3x3"
-    )(branch_2)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_4_Branch_2_Conv2d_0b_3x3_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Block35_4_Branch_2_Conv2d_0b_3x3_Activation")(branch_2)
-    branch_2 = Conv2D(
-        32, 3, strides=1, padding="same", use_bias=False, name="Block35_4_Branch_2_Conv2d_0c_3x3"
-    )(branch_2)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_4_Branch_2_Conv2d_0c_3x3_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Block35_4_Branch_2_Conv2d_0c_3x3_Activation")(branch_2)
-    branches = [branch_0, branch_1, branch_2]
-    mixed = Concatenate(axis=3, name="Block35_4_Concatenate")(branches)
-    up = Conv2D(256, 1, strides=1, padding="same", use_bias=True, name="Block35_4_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.17})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block35_4_Activation")(x)
+        if self.classify and self.num_classes is not None:
+            self.logits = nn.Linear(512, self.num_classes)
 
-    branch_0 = Conv2D(
-        32, 1, strides=1, padding="same", use_bias=False, name="Block35_5_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_5_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block35_5_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        32, 1, strides=1, padding="same", use_bias=False, name="Block35_5_Branch_1_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_5_Branch_1_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block35_5_Branch_1_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        32, 3, strides=1, padding="same", use_bias=False, name="Block35_5_Branch_1_Conv2d_0b_3x3"
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_5_Branch_1_Conv2d_0b_3x3_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block35_5_Branch_1_Conv2d_0b_3x3_Activation")(branch_1)
-    branch_2 = Conv2D(
-        32, 1, strides=1, padding="same", use_bias=False, name="Block35_5_Branch_2_Conv2d_0a_1x1"
-    )(x)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_5_Branch_2_Conv2d_0a_1x1_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Block35_5_Branch_2_Conv2d_0a_1x1_Activation")(branch_2)
-    branch_2 = Conv2D(
-        32, 3, strides=1, padding="same", use_bias=False, name="Block35_5_Branch_2_Conv2d_0b_3x3"
-    )(branch_2)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_5_Branch_2_Conv2d_0b_3x3_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Block35_5_Branch_2_Conv2d_0b_3x3_Activation")(branch_2)
-    branch_2 = Conv2D(
-        32, 3, strides=1, padding="same", use_bias=False, name="Block35_5_Branch_2_Conv2d_0c_3x3"
-    )(branch_2)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block35_5_Branch_2_Conv2d_0c_3x3_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Block35_5_Branch_2_Conv2d_0c_3x3_Activation")(branch_2)
-    branches = [branch_0, branch_1, branch_2]
-    mixed = Concatenate(axis=3, name="Block35_5_Concatenate")(branches)
-    up = Conv2D(256, 1, strides=1, padding="same", use_bias=True, name="Block35_5_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.17})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block35_5_Activation")(x)
+        self.device = torch.device("cpu")
+        if device is not None:
+            self.device = device
+            self.to(device)
 
-    # Mixed 6a (Reduction-A block):
-    branch_0 = Conv2D(
-        384, 3, strides=2, padding="valid", use_bias=False, name="Mixed_6a_Branch_0_Conv2d_1a_3x3"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Mixed_6a_Branch_0_Conv2d_1a_3x3_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Mixed_6a_Branch_0_Conv2d_1a_3x3_Activation")(branch_0)
-    branch_1 = Conv2D(
-        192, 1, strides=1, padding="same", use_bias=False, name="Mixed_6a_Branch_1_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Mixed_6a_Branch_1_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Mixed_6a_Branch_1_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        192, 3, strides=1, padding="same", use_bias=False, name="Mixed_6a_Branch_1_Conv2d_0b_3x3"
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Mixed_6a_Branch_1_Conv2d_0b_3x3_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Mixed_6a_Branch_1_Conv2d_0b_3x3_Activation")(branch_1)
-    branch_1 = Conv2D(
-        256, 3, strides=2, padding="valid", use_bias=False, name="Mixed_6a_Branch_1_Conv2d_1a_3x3"
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Mixed_6a_Branch_1_Conv2d_1a_3x3_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Mixed_6a_Branch_1_Conv2d_1a_3x3_Activation")(branch_1)
-    branch_pool = MaxPooling2D(
-        3, strides=2, padding="valid", name="Mixed_6a_Branch_2_MaxPool_1a_3x3"
-    )(x)
-    branches = [branch_0, branch_1, branch_pool]
-    x = Concatenate(axis=3, name="Mixed_6a")(branches)
+    def forward(self, x):
+        """Calculate embeddings or logits given a batch of input image tensors.
 
-    # 10x Block17 (Inception-ResNet-B block):
-    branch_0 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_1_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_1_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block17_1_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_1_Branch_1_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_1_Branch_1_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_1_Branch_1_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [1, 7],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_1_Branch_1_Conv2d_0b_1x7",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_1_Branch_1_Conv2d_0b_1x7_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_1_Branch_1_Conv2d_0b_1x7_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [7, 1],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_1_Branch_1_Conv2d_0c_7x1",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_1_Branch_1_Conv2d_0c_7x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_1_Branch_1_Conv2d_0c_7x1_Activation")(branch_1)
-    branches = [branch_0, branch_1]
-    mixed = Concatenate(axis=3, name="Block17_1_Concatenate")(branches)
-    up = Conv2D(896, 1, strides=1, padding="same", use_bias=True, name="Block17_1_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.1})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block17_1_Activation")(x)
+        Arguments:
+            x {torch.tensor} -- Batch of image tensors representing faces.
 
-    branch_0 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_2_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_2_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block17_2_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_2_Branch_2_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_2_Branch_2_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_2_Branch_2_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [1, 7],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_2_Branch_2_Conv2d_0b_1x7",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_2_Branch_2_Conv2d_0b_1x7_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_2_Branch_2_Conv2d_0b_1x7_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [7, 1],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_2_Branch_2_Conv2d_0c_7x1",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_2_Branch_2_Conv2d_0c_7x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_2_Branch_2_Conv2d_0c_7x1_Activation")(branch_1)
-    branches = [branch_0, branch_1]
-    mixed = Concatenate(axis=3, name="Block17_2_Concatenate")(branches)
-    up = Conv2D(896, 1, strides=1, padding="same", use_bias=True, name="Block17_2_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.1})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block17_2_Activation")(x)
-
-    branch_0 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_3_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_3_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block17_3_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_3_Branch_3_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_3_Branch_3_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_3_Branch_3_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [1, 7],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_3_Branch_3_Conv2d_0b_1x7",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_3_Branch_3_Conv2d_0b_1x7_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_3_Branch_3_Conv2d_0b_1x7_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [7, 1],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_3_Branch_3_Conv2d_0c_7x1",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_3_Branch_3_Conv2d_0c_7x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_3_Branch_3_Conv2d_0c_7x1_Activation")(branch_1)
-    branches = [branch_0, branch_1]
-    mixed = Concatenate(axis=3, name="Block17_3_Concatenate")(branches)
-    up = Conv2D(896, 1, strides=1, padding="same", use_bias=True, name="Block17_3_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.1})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block17_3_Activation")(x)
-
-    branch_0 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_4_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_4_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block17_4_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_4_Branch_4_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_4_Branch_4_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_4_Branch_4_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [1, 7],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_4_Branch_4_Conv2d_0b_1x7",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_4_Branch_4_Conv2d_0b_1x7_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_4_Branch_4_Conv2d_0b_1x7_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [7, 1],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_4_Branch_4_Conv2d_0c_7x1",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_4_Branch_4_Conv2d_0c_7x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_4_Branch_4_Conv2d_0c_7x1_Activation")(branch_1)
-    branches = [branch_0, branch_1]
-    mixed = Concatenate(axis=3, name="Block17_4_Concatenate")(branches)
-    up = Conv2D(896, 1, strides=1, padding="same", use_bias=True, name="Block17_4_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.1})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block17_4_Activation")(x)
-
-    branch_0 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_5_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_5_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block17_5_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_5_Branch_5_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_5_Branch_5_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_5_Branch_5_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [1, 7],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_5_Branch_5_Conv2d_0b_1x7",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_5_Branch_5_Conv2d_0b_1x7_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_5_Branch_5_Conv2d_0b_1x7_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [7, 1],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_5_Branch_5_Conv2d_0c_7x1",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_5_Branch_5_Conv2d_0c_7x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_5_Branch_5_Conv2d_0c_7x1_Activation")(branch_1)
-    branches = [branch_0, branch_1]
-    mixed = Concatenate(axis=3, name="Block17_5_Concatenate")(branches)
-    up = Conv2D(896, 1, strides=1, padding="same", use_bias=True, name="Block17_5_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.1})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block17_5_Activation")(x)
-
-    branch_0 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_6_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_6_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block17_6_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_6_Branch_6_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_6_Branch_6_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_6_Branch_6_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [1, 7],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_6_Branch_6_Conv2d_0b_1x7",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_6_Branch_6_Conv2d_0b_1x7_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_6_Branch_6_Conv2d_0b_1x7_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [7, 1],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_6_Branch_6_Conv2d_0c_7x1",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_6_Branch_6_Conv2d_0c_7x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_6_Branch_6_Conv2d_0c_7x1_Activation")(branch_1)
-    branches = [branch_0, branch_1]
-    mixed = Concatenate(axis=3, name="Block17_6_Concatenate")(branches)
-    up = Conv2D(896, 1, strides=1, padding="same", use_bias=True, name="Block17_6_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.1})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block17_6_Activation")(x)
-
-    branch_0 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_7_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_7_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block17_7_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_7_Branch_7_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_7_Branch_7_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_7_Branch_7_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [1, 7],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_7_Branch_7_Conv2d_0b_1x7",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_7_Branch_7_Conv2d_0b_1x7_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_7_Branch_7_Conv2d_0b_1x7_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [7, 1],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_7_Branch_7_Conv2d_0c_7x1",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_7_Branch_7_Conv2d_0c_7x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_7_Branch_7_Conv2d_0c_7x1_Activation")(branch_1)
-    branches = [branch_0, branch_1]
-    mixed = Concatenate(axis=3, name="Block17_7_Concatenate")(branches)
-    up = Conv2D(896, 1, strides=1, padding="same", use_bias=True, name="Block17_7_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.1})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block17_7_Activation")(x)
-
-    branch_0 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_8_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_8_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block17_8_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_8_Branch_8_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_8_Branch_8_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_8_Branch_8_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [1, 7],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_8_Branch_8_Conv2d_0b_1x7",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_8_Branch_8_Conv2d_0b_1x7_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_8_Branch_8_Conv2d_0b_1x7_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [7, 1],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_8_Branch_8_Conv2d_0c_7x1",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_8_Branch_8_Conv2d_0c_7x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_8_Branch_8_Conv2d_0c_7x1_Activation")(branch_1)
-    branches = [branch_0, branch_1]
-    mixed = Concatenate(axis=3, name="Block17_8_Concatenate")(branches)
-    up = Conv2D(896, 1, strides=1, padding="same", use_bias=True, name="Block17_8_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.1})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block17_8_Activation")(x)
-
-    branch_0 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_9_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_9_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block17_9_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_9_Branch_9_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_9_Branch_9_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_9_Branch_9_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [1, 7],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_9_Branch_9_Conv2d_0b_1x7",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_9_Branch_9_Conv2d_0b_1x7_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_9_Branch_9_Conv2d_0b_1x7_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [7, 1],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_9_Branch_9_Conv2d_0c_7x1",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_9_Branch_9_Conv2d_0c_7x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_9_Branch_9_Conv2d_0c_7x1_Activation")(branch_1)
-    branches = [branch_0, branch_1]
-    mixed = Concatenate(axis=3, name="Block17_9_Concatenate")(branches)
-    up = Conv2D(896, 1, strides=1, padding="same", use_bias=True, name="Block17_9_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.1})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block17_9_Activation")(x)
-
-    branch_0 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_10_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_10_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block17_10_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        128, 1, strides=1, padding="same", use_bias=False, name="Block17_10_Branch_10_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_10_Branch_10_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_10_Branch_10_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [1, 7],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_10_Branch_10_Conv2d_0b_1x7",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_10_Branch_10_Conv2d_0b_1x7_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_10_Branch_10_Conv2d_0b_1x7_Activation")(branch_1)
-    branch_1 = Conv2D(
-        128,
-        [7, 1],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block17_10_Branch_10_Conv2d_0c_7x1",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block17_10_Branch_10_Conv2d_0c_7x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block17_10_Branch_10_Conv2d_0c_7x1_Activation")(branch_1)
-    branches = [branch_0, branch_1]
-    mixed = Concatenate(axis=3, name="Block17_10_Concatenate")(branches)
-    up = Conv2D(896, 1, strides=1, padding="same", use_bias=True, name="Block17_10_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.1})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block17_10_Activation")(x)
-
-    # Mixed 7a (Reduction-B block): 8 x 8 x 2080
-    branch_0 = Conv2D(
-        256, 1, strides=1, padding="same", use_bias=False, name="Mixed_7a_Branch_0_Conv2d_0a_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Mixed_7a_Branch_0_Conv2d_0a_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Mixed_7a_Branch_0_Conv2d_0a_1x1_Activation")(branch_0)
-    branch_0 = Conv2D(
-        384, 3, strides=2, padding="valid", use_bias=False, name="Mixed_7a_Branch_0_Conv2d_1a_3x3"
-    )(branch_0)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Mixed_7a_Branch_0_Conv2d_1a_3x3_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Mixed_7a_Branch_0_Conv2d_1a_3x3_Activation")(branch_0)
-    branch_1 = Conv2D(
-        256, 1, strides=1, padding="same", use_bias=False, name="Mixed_7a_Branch_1_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Mixed_7a_Branch_1_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Mixed_7a_Branch_1_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        256, 3, strides=2, padding="valid", use_bias=False, name="Mixed_7a_Branch_1_Conv2d_1a_3x3"
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Mixed_7a_Branch_1_Conv2d_1a_3x3_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Mixed_7a_Branch_1_Conv2d_1a_3x3_Activation")(branch_1)
-    branch_2 = Conv2D(
-        256, 1, strides=1, padding="same", use_bias=False, name="Mixed_7a_Branch_2_Conv2d_0a_1x1"
-    )(x)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Mixed_7a_Branch_2_Conv2d_0a_1x1_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Mixed_7a_Branch_2_Conv2d_0a_1x1_Activation")(branch_2)
-    branch_2 = Conv2D(
-        256, 3, strides=1, padding="same", use_bias=False, name="Mixed_7a_Branch_2_Conv2d_0b_3x3"
-    )(branch_2)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Mixed_7a_Branch_2_Conv2d_0b_3x3_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Mixed_7a_Branch_2_Conv2d_0b_3x3_Activation")(branch_2)
-    branch_2 = Conv2D(
-        256, 3, strides=2, padding="valid", use_bias=False, name="Mixed_7a_Branch_2_Conv2d_1a_3x3"
-    )(branch_2)
-    branch_2 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Mixed_7a_Branch_2_Conv2d_1a_3x3_BatchNorm",
-    )(branch_2)
-    branch_2 = Activation("relu", name="Mixed_7a_Branch_2_Conv2d_1a_3x3_Activation")(branch_2)
-    branch_pool = MaxPooling2D(
-        3, strides=2, padding="valid", name="Mixed_7a_Branch_3_MaxPool_1a_3x3"
-    )(x)
-    branches = [branch_0, branch_1, branch_2, branch_pool]
-    x = Concatenate(axis=3, name="Mixed_7a")(branches)
-
-    # 5x Block8 (Inception-ResNet-C block):
-
-    branch_0 = Conv2D(
-        192, 1, strides=1, padding="same", use_bias=False, name="Block8_1_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_1_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block8_1_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        192, 1, strides=1, padding="same", use_bias=False, name="Block8_1_Branch_1_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_1_Branch_1_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_1_Branch_1_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        192,
-        [1, 3],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block8_1_Branch_1_Conv2d_0b_1x3",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_1_Branch_1_Conv2d_0b_1x3_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_1_Branch_1_Conv2d_0b_1x3_Activation")(branch_1)
-    branch_1 = Conv2D(
-        192,
-        [3, 1],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block8_1_Branch_1_Conv2d_0c_3x1",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_1_Branch_1_Conv2d_0c_3x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_1_Branch_1_Conv2d_0c_3x1_Activation")(branch_1)
-    branches = [branch_0, branch_1]
-    mixed = Concatenate(axis=3, name="Block8_1_Concatenate")(branches)
-    up = Conv2D(1792, 1, strides=1, padding="same", use_bias=True, name="Block8_1_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.2})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block8_1_Activation")(x)
-
-    branch_0 = Conv2D(
-        192, 1, strides=1, padding="same", use_bias=False, name="Block8_2_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_2_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block8_2_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        192, 1, strides=1, padding="same", use_bias=False, name="Block8_2_Branch_2_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_2_Branch_2_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_2_Branch_2_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        192,
-        [1, 3],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block8_2_Branch_2_Conv2d_0b_1x3",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_2_Branch_2_Conv2d_0b_1x3_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_2_Branch_2_Conv2d_0b_1x3_Activation")(branch_1)
-    branch_1 = Conv2D(
-        192,
-        [3, 1],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block8_2_Branch_2_Conv2d_0c_3x1",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_2_Branch_2_Conv2d_0c_3x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_2_Branch_2_Conv2d_0c_3x1_Activation")(branch_1)
-    branches = [branch_0, branch_1]
-    mixed = Concatenate(axis=3, name="Block8_2_Concatenate")(branches)
-    up = Conv2D(1792, 1, strides=1, padding="same", use_bias=True, name="Block8_2_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.2})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block8_2_Activation")(x)
-
-    branch_0 = Conv2D(
-        192, 1, strides=1, padding="same", use_bias=False, name="Block8_3_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_3_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block8_3_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        192, 1, strides=1, padding="same", use_bias=False, name="Block8_3_Branch_3_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_3_Branch_3_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_3_Branch_3_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        192,
-        [1, 3],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block8_3_Branch_3_Conv2d_0b_1x3",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_3_Branch_3_Conv2d_0b_1x3_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_3_Branch_3_Conv2d_0b_1x3_Activation")(branch_1)
-    branch_1 = Conv2D(
-        192,
-        [3, 1],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block8_3_Branch_3_Conv2d_0c_3x1",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_3_Branch_3_Conv2d_0c_3x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_3_Branch_3_Conv2d_0c_3x1_Activation")(branch_1)
-    branches = [branch_0, branch_1]
-    mixed = Concatenate(axis=3, name="Block8_3_Concatenate")(branches)
-    up = Conv2D(1792, 1, strides=1, padding="same", use_bias=True, name="Block8_3_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.2})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block8_3_Activation")(x)
-
-    branch_0 = Conv2D(
-        192, 1, strides=1, padding="same", use_bias=False, name="Block8_4_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_4_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block8_4_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        192, 1, strides=1, padding="same", use_bias=False, name="Block8_4_Branch_4_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_4_Branch_4_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_4_Branch_4_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        192,
-        [1, 3],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block8_4_Branch_4_Conv2d_0b_1x3",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_4_Branch_4_Conv2d_0b_1x3_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_4_Branch_4_Conv2d_0b_1x3_Activation")(branch_1)
-    branch_1 = Conv2D(
-        192,
-        [3, 1],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block8_4_Branch_4_Conv2d_0c_3x1",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_4_Branch_4_Conv2d_0c_3x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_4_Branch_4_Conv2d_0c_3x1_Activation")(branch_1)
-    branches = [branch_0, branch_1]
-    mixed = Concatenate(axis=3, name="Block8_4_Concatenate")(branches)
-    up = Conv2D(1792, 1, strides=1, padding="same", use_bias=True, name="Block8_4_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.2})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block8_4_Activation")(x)
-
-    branch_0 = Conv2D(
-        192, 1, strides=1, padding="same", use_bias=False, name="Block8_5_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_5_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block8_5_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        192, 1, strides=1, padding="same", use_bias=False, name="Block8_5_Branch_5_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_5_Branch_5_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_5_Branch_5_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        192,
-        [1, 3],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block8_5_Branch_5_Conv2d_0b_1x3",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_5_Branch_5_Conv2d_0b_1x3_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_5_Branch_5_Conv2d_0b_1x3_Activation")(branch_1)
-    branch_1 = Conv2D(
-        192,
-        [3, 1],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block8_5_Branch_5_Conv2d_0c_3x1",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_5_Branch_5_Conv2d_0c_3x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_5_Branch_5_Conv2d_0c_3x1_Activation")(branch_1)
-    branches = [branch_0, branch_1]
-    mixed = Concatenate(axis=3, name="Block8_5_Concatenate")(branches)
-    up = Conv2D(1792, 1, strides=1, padding="same", use_bias=True, name="Block8_5_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 0.2})(up)
-    x = add([x, up])
-    x = Activation("relu", name="Block8_5_Activation")(x)
-
-    branch_0 = Conv2D(
-        192, 1, strides=1, padding="same", use_bias=False, name="Block8_6_Branch_0_Conv2d_1x1"
-    )(x)
-    branch_0 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_6_Branch_0_Conv2d_1x1_BatchNorm",
-    )(branch_0)
-    branch_0 = Activation("relu", name="Block8_6_Branch_0_Conv2d_1x1_Activation")(branch_0)
-    branch_1 = Conv2D(
-        192, 1, strides=1, padding="same", use_bias=False, name="Block8_6_Branch_1_Conv2d_0a_1x1"
-    )(x)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_6_Branch_1_Conv2d_0a_1x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_6_Branch_1_Conv2d_0a_1x1_Activation")(branch_1)
-    branch_1 = Conv2D(
-        192,
-        [1, 3],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block8_6_Branch_1_Conv2d_0b_1x3",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_6_Branch_1_Conv2d_0b_1x3_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_6_Branch_1_Conv2d_0b_1x3_Activation")(branch_1)
-    branch_1 = Conv2D(
-        192,
-        [3, 1],
-        strides=1,
-        padding="same",
-        use_bias=False,
-        name="Block8_6_Branch_1_Conv2d_0c_3x1",
-    )(branch_1)
-    branch_1 = BatchNormalization(
-        axis=3,
-        momentum=0.995,
-        epsilon=0.001,
-        scale=False,
-        name="Block8_6_Branch_1_Conv2d_0c_3x1_BatchNorm",
-    )(branch_1)
-    branch_1 = Activation("relu", name="Block8_6_Branch_1_Conv2d_0c_3x1_Activation")(branch_1)
-    branches = [branch_0, branch_1]
-    mixed = Concatenate(axis=3, name="Block8_6_Concatenate")(branches)
-    up = Conv2D(1792, 1, strides=1, padding="same", use_bias=True, name="Block8_6_Conv2d_1x1")(
-        mixed
-    )
-    up = Lambda(scaling, output_shape=K.int_shape(up)[1:], arguments={"scale": 1})(up)
-    x = add([x, up])
-
-    # Classification block
-    x = GlobalAveragePooling2D(name="AvgPool")(x)
-    x = Dropout(1.0 - 0.8, name="Dropout")(x)
-    # Bottleneck
-    x = Dense(dimension, use_bias=False, name="Bottleneck")(x)
-    x = BatchNormalization(momentum=0.995, epsilon=0.001, scale=False, name="Bottleneck_BatchNorm")(
-        x
-    )
-
-    # Create model
-    # with tf.device('/GPU:0'):
-    model = Model(inputs, x, name="inception_resnet_v1")
-
-    return model
-
+        Returns:
+            torch.tensor -- Batch of embedding vectors or multinomial logits.
+        """
+        x = self.conv2d_1a(x)
+        x = self.conv2d_2a(x)
+        x = self.conv2d_2b(x)
+        x = self.maxpool_3a(x)
+        x = self.conv2d_3b(x)
+        x = self.conv2d_4a(x)
+        x = self.conv2d_4b(x)
+        x = self.repeat_1(x)
+        x = self.mixed_6a(x)
+        x = self.repeat_2(x)
+        x = self.mixed_7a(x)
+        x = self.repeat_3(x)
+        x = self.block8(x)
+        x = self.avgpool_1a(x)
+        x = self.dropout(x)
+        x = self.last_linear(x.view(x.shape[0], -1))
+        x = self.last_bn(x)
+        if self.classify:
+            x = self.logits(x)
+        else:
+            x = F.normalize(x, p=2, dim=1)
+        return x
