@@ -12,7 +12,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile,Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.broker import check_videos_task, prepare_dataset_task
+from app.broker import check_videos_task, prepare_dataset_task, check_videos_in_nas_task
 from app.clients.db_manager import DatabaseManager
 
 IMAGE_STORAGE_PATH = "datasets/new_persons"
@@ -47,8 +47,8 @@ async def lifespan(app: FastAPI):
 
     prepare_dataset_task.delay()
 
-    # thread = threading.Thread(target=check_database_periodically, daemon=True)
-    # thread.start()
+    thread = threading.Thread(target=check_vidoes_periodically, daemon=True)
+    thread.start()
     yield
     pass
 
@@ -56,10 +56,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-def check_database_periodically():
+def check_vidoes_periodically():
     while True:
-        print("Проверяю БД...")
-        check_videos_task.delay()
+        check_videos_in_nas_task.delay()
+        # check_videos_task.delay()
         time.sleep(1 * 60 * 60)
 
 
@@ -215,81 +215,6 @@ async def get_person_intervals(person_name: str = Query(..., description="Имя
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.get("/api/videos-nas/", response_model=List[Dict[str, Union[str, int, float]]])
-# async def list_videos_in_folder(folder_path: str = ""):
-#     """
-#     Возвращает список видеофайлов в указанной папке на NAS
-    
-#     Параметры:
-#     - folder_path: относительный путь к папке внутри NAS
-    
-#     Возвращает:
-#     - Список словарей с информацией о видеофайлах:
-#       [{
-#         "name": "video1.mp4",
-#         "path": "/mnt/smb_share/path/video1.mp4",
-#         "size": 1024567,  # размер в байтах (число)
-#         "modified": 1708594981.4404233  # timestamp (число с плавающей точкой)
-#       }, ...]
-#     """
-#     try:
-#         nas_root = "/mnt/smb_share/[02] Проекты/[05] Тестовые видео"
-        
-#         # Проверяем, что NAS доступен
-#         if not os.path.exists(nas_root):
-#             raise HTTPException(
-#                 status_code=503,
-#                 detail="NAS не доступен. Проверьте подключение."
-#             )
-        
-#         # Формируем полный путь
-#         full_path = os.path.join(nas_root, folder_path)
-        
-#         # Проверяем существование папки
-#         if not os.path.exists(full_path):
-#             raise HTTPException(
-#                 status_code=404,
-#                 detail=f"Папка {full_path} не существует"
-#             )
-        
-#         if not os.path.isdir(full_path):
-#             raise HTTPException(
-#                 status_code=400,
-#                 detail=f"{full_path} не является папкой"
-#             )
-        
-#         # Собираем информацию о видеофайлах
-#         video_files = []
-#         for filename in os.listdir(full_path):
-#             file_ext = os.path.splitext(filename)[1]
-#             if file_ext in ALLOWED_VIDEO_EXTENSIONS:
-#                 file_path = os.path.join(full_path, filename)
-#                 try:
-#                     stat = os.stat(file_path)
-                    
-#                     video_files.append({
-#                         "name": filename,
-#                         "path": file_path,
-#                         "size": stat.st_size,  # размер в байтах
-#                         "modified": stat.st_mtime  # timestamp
-#                     })
-#                 except Exception as e:
-#                     print(f"Ошибка при обработке файла {filename}: {str(e)}")
-#                     continue
-        
-#         return video_files
-    
-#     except PermissionError as e:
-#         raise HTTPException(
-#             status_code=403,
-#             detail=f"Нет доступа к папке: {str(e)}"
-#         )
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=500,
-#             detail=f"Ошибка при получении списка видео: {str(e)}"
-#         )
 
 if __name__ == "__main__":
     load_dotenv(".env")
