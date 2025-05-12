@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Union
 import pandas as pd
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile,Query
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -37,6 +37,15 @@ class PersonIntervalsResponse(BaseModel):
     intervals: List[TimeInterval]
     total_intervals: int
     total_videos: int
+    total_frames: int
+
+
+class PersonSummary(BaseModel):
+    person_name: str
+    mean_confidence: float
+    video_list: List[str]
+    video_count: int
+    total_time: float
     total_frames: int
 
 
@@ -186,7 +195,8 @@ async def get_top_faces():
 
 
 @app.get("/api/person-intervals/", response_model=PersonIntervalsResponse)
-async def get_person_intervals(person_name: str = Query(..., description="Имя человека для поиска")
+async def get_person_intervals(
+    person_name: str = Query(..., description="Имя человека для поиска")
 ):
     try:
         service = DatabaseManager()
@@ -200,21 +210,33 @@ async def get_person_intervals(person_name: str = Query(..., description="Имя
                 "end_time": interval.end_time,
                 "frame_count": interval.frame_count,
                 "first_frame": interval.first_frame,
-                "last_frame": interval.last_frame
+                "last_frame": interval.last_frame,
             }
             for interval in intervals
         ]
-        
+
         return PersonIntervalsResponse(
             person_name=person_name,
             intervals=intervals_dicts,
             total_intervals=len(intervals),
             total_videos=total_videos,
-            total_frames=total_frames
+            total_frames=total_frames,
         )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/person-summary/", response_model=List[PersonSummary])
+async def get_person_summary():
+    try:
+        db_manager = DatabaseManager()
+        return db_manager.get_person_summary_stats()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     load_dotenv(".env")

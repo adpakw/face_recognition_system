@@ -6,6 +6,7 @@ from typing import List, Tuple, Optional
 from pydantic import BaseModel
 from pandas import DataFrame
 
+
 class TimeInterval(BaseModel):
     video_name: str
     start_time: float
@@ -14,12 +15,23 @@ class TimeInterval(BaseModel):
     first_frame: int
     last_frame: int
 
+
 class PersonIntervalsResponse(BaseModel):
     person_name: str
     intervals: List[TimeInterval]
     total_intervals: int
     total_videos: int
     total_frames: int
+
+
+class PersonSummary(BaseModel):
+    person_name: str
+    mean_confidence: float
+    video_list: List[str]
+    video_count: int
+    total_time: float
+    total_frames: int
+
 
 class DatabaseManager:
     def execute_sql_files_from_folder(self) -> None:
@@ -92,9 +104,7 @@ class DatabaseManager:
                     detection["face"]["y2"] if detection["face"] else None
                 ),
                 "face_detection_conf": (
-                    float(detection["face"]["score"])
-                    if detection["face"]
-                    else None
+                    float(detection["face"]["score"]) if detection["face"] else None
                 ),
                 "person_name": (
                     detection["person_id"]["name"] if detection["person_id"] else None
@@ -124,7 +134,7 @@ class DatabaseManager:
     def insert_video_info(self, video_info) -> None:
         with PostgreSQLClient() as client:
             client.insert("videos", [video_info])
-    
+
     def get_new_videos(self):
         with PostgreSQLClient() as client:
             videos_in_db = client.execute_query("SELECT * FROM videos")["video_name"]
@@ -134,30 +144,37 @@ class DatabaseManager:
             videos = [file for file in all_files if file.endswith(".mp4")]
             new_videos = list(set(videos) - set(videos_in_db))
             return new_videos
-    
+
     def get_all_people(self):
         with PostgreSQLClient() as client:
-            people = client.execute_query(query="""SELECT person_id FROM people""", return_df=True)
+            people = client.execute_query(
+                query="""SELECT person_id FROM people""", return_df=True
+            )
             return people
-    
+
     def get_all_videos(self):
         with PostgreSQLClient() as client:
-            videos = client.execute_query(query="""SELECT * FROM videos""", return_df=True)
+            videos = client.execute_query(
+                query="""SELECT * FROM videos""", return_df=True
+            )
             return videos
-    
+
     def get_top_10(self):
         with PostgreSQLClient() as client:
-            top_10 = client.execute_query(query="""SELECT count(person_name), person_name FROM video_analysis_results
+            top_10 = client.execute_query(
+                query="""SELECT count(person_name), person_name FROM video_analysis_results
                  WHERE person_name <> 'None' and person_name <> 'unknown'
                  GROUP BY person_name
                  ORDER BY count(person_name) DESC
-                 LIMIT 10""", return_df=True)
-            top_10['rank'] = top_10.index + 1
+                 LIMIT 10""",
+                return_df=True,
+            )
+            top_10["rank"] = top_10.index + 1
             return top_10
 
-
-
-    def find_continuous_intervals(self, person_name: str) -> Tuple[List[TimeInterval], int, int]:
+    def find_continuous_intervals(
+        self, person_name: str
+    ) -> Tuple[List[TimeInterval], int, int]:
         with PostgreSQLClient() as db:
             query = """
                 SELECT 
@@ -171,7 +188,7 @@ class DatabaseManager:
             data = db.execute_query(query, (person_name,))
         if data.empty:
             return [], 0, 0
-        
+
         intervals = []
         current_video = None
         current_start = None
@@ -179,12 +196,12 @@ class DatabaseManager:
         current_end = None
         current_end_frame = None
         expected_next_frame = None
-        
+
         for _, row in data.iterrows():
-            video = row['video_name']
-            frame = row['frame_number']
-            timestamp = row['timestamp']
-            
+            video = row["video_name"]
+            frame = row["frame_number"]
+            timestamp = row["timestamp"]
+
             if video != current_video:
                 if current_start is not None:
                     interval = TimeInterval(
@@ -193,10 +210,10 @@ class DatabaseManager:
                         end_time=current_end,
                         frame_count=current_end_frame - current_start_frame + 1,
                         first_frame=current_start_frame,
-                        last_frame=current_end_frame
+                        last_frame=current_end_frame,
                     )
                     intervals.append(interval)
-                
+
                 current_video = video
                 current_start = timestamp
                 current_start_frame = frame
@@ -216,16 +233,16 @@ class DatabaseManager:
                             end_time=current_end,
                             frame_count=current_end_frame - current_start_frame + 1,
                             first_frame=current_start_frame,
-                            last_frame=current_end_frame
+                            last_frame=current_end_frame,
                         )
                         intervals.append(interval)
-                    
+
                     current_start = timestamp
                     current_start_frame = frame
                     current_end = timestamp
                     current_end_frame = frame
                     expected_next_frame = frame + 1
-        
+
         if current_start is not None:
             interval = TimeInterval(
                 video_name=current_video,
@@ -233,11 +250,54 @@ class DatabaseManager:
                 end_time=current_end,
                 frame_count=current_end_frame - current_start_frame + 1,
                 first_frame=current_start_frame,
-                last_frame=current_end_frame
+                last_frame=current_end_frame,
             )
             intervals.append(interval)
-        
+
         unique_videos = {interval.video_name for interval in intervals}
         total_frames = sum(interval.frame_count for interval in intervals)
-        
+
         return intervals, len(unique_videos), total_frames
+
+    def get_person_summary_stats(self) -> List[PersonSummary]:
+        """Основной метод для получения сводной статистики"""
+        base_query = """
+            SELECT 
+                person_name,
+                AVG(person_identification_conf) as mean_confidence,
+                COUNT(DISTINCT video_name) as video_count
+            FROM video_analysis_results
+            WHERE person_name NOT IN ('None', 'unknown')
+            GROUP BY person_name
+            ORDER BY COUNT(person_name) DESC
+        """
+        with PostgreSQLClient() as db:
+            base_stats = db.execute_query(base_query)
+
+        results = []
+
+        for _, row in base_stats.iterrows():
+            person_name = row["person_name"]
+
+            intervals, total_videos, total_frames = self.find_continuous_intervals(
+                person_name
+            )
+
+            total_time = sum(
+                (interval.end_time - interval.start_time) for interval in intervals
+            )
+
+            video_list = list({interval.video_name for interval in intervals})
+
+            results.append(
+                PersonSummary(
+                    person_name=person_name,
+                    mean_confidence=row["mean_confidence"],
+                    video_list=video_list,
+                    video_count=len(video_list),
+                    total_time=total_time,
+                    total_frames=total_frames,
+                )
+            )
+
+        return results
